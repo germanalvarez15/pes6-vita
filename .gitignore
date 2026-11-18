@@ -1,0 +1,19 @@
+# Game data: never committed (bring your own dump)
+*.iso
+*.cso
+*.elf
+*.BIN
+*.PBP
+/data/
+/game/
+# Build output
+/build/
+/out/
+*.vpk
+*.o
+*.a
+__pycache__/
+# Upstream checkout (own git history)
+/external/
+# Claude Code context (private: never published)
+.claude/
