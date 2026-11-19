@@ -19,4 +19,24 @@ enum {
 };
 void screen_use_gl(int mode);
 
+/* A notice over the game's picture for `ms` milliseconds, from any thread: what the PSP's savedata
+ * and message dialogs would have shown (they complete at once here). */
+void screen_notice(unsigned ms, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
+/* On the GE thread, after the frame is presented and before the swap: the notice, while it lasts. */
+void screen_notice_draw(void);
+
+/* A list over the game's picture: the PSP's save / load dialog (main.c drives it). */
+#define SCREEN_LIST_MAX 64
+typedef struct {
+    char heading[48];
+    char hint[64];
+    char question[96];         /* a yes / no question over the list; "" for none */
+    char answers[48];          /* its buttons */
+    int  n, sel;
+    struct { char top[100], bottom[160], right[32]; int fresh; } row[SCREEN_LIST_MAX];   /* right: on the top line */
+} screen_list;
+void screen_list_show(const screen_list *l);    /* any thread: shows it, or its new state */
+void screen_list_hide(void);
+void screen_list_draw(void);                    /* GE thread, after the present, before the notice */
+
 #endif

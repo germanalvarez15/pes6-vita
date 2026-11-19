@@ -3,12 +3,15 @@
 #include "ge.h"
 
 #include <psp2/display.h>
+#include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/sysmem.h>
 #include <vitaGL.h>
 
 #include <stdarg.h>
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 #define SW 960
@@ -64,17 +67,17 @@ static char g_lines[MAX_LINES][160];
 static int g_n;
 static int g_gl;
 
-/* `s` at (x, y), each font cell a k x k block; accented letters lose the accent. */
-static void text(int x, int y, int k, const char *s, uint32_t color) {
-    for (const unsigned char *p = (const unsigned char *)s; *p && x < SW; p++) {
+/* `s` at (x, y) of the pw x ph picture px, each font cell a k x k block; accented letters lose
+ * the accent (French, German, Italian, Spanish text: the game's own messages and the port's). */
+static void text_in(uint32_t *px, int pw, int ph, int x, int y, int k, const char *s, uint32_t color) {
+    for (const unsigned char *p = (const unsigned char *)s; *p && x < pw; p++) {
         char c = (char)*p;
-        if (*p == 0xC3 && p[1]) {                      /* UTF-8 Latin-1: á é í ó ú ñ and capitals */
-            const unsigned char l = p[1] | 0x20;
-            c = l == 0xA1 ? 'a' : l == 0xA9 ? 'e' : l == 0xAD ? 'i' : l == 0xB3 ? 'o' : (l == 0xBA || l == 0xBC) ? 'u'
-              : l == 0xB1 ? 'n' : '?';
-            if (p[1] < 0xA0) c = (char)(c - 'a' + 'A');
+        if (*p == 0xC3 && p[1] >= 0x80 && p[1] <= 0xBF) {   /* UTF-8 Latin-1 letters (U+00C0-00FF) */
+            static const char BARE[] = "AAAAAAACEEEEIIIIDNOOOOOxOUUUUYPsaaaaaaaceeeeiiiidnooooo/ouuuuypy";
+            _Static_assert(sizeof BARE == 65, "one per letter from U+00C0");
+            c = BARE[p[1] - 0x80];
             p++;
-        } else if (*p >= 0x80) {
+        } else if (*p >= 0x80) {                         /* anything else (¿ ¡ ...) is left out */
             continue;
         }
         const uint8_t *g = glyph(c);
@@ -85,10 +88,10 @@ static void text(int x, int y, int k, const char *s, uint32_t color) {
                     if (!(g[r] & (16 >> col))) continue;
                     for (int j = 0; j < k; j++) {
                         const int py = y + dy + r * k + j;
-                        if (py < 0 || py >= SH) continue;
+                        if (py < 0 || py >= ph) continue;
                         for (int i = 0; i < k; i++) {
-                            const int px = x + col * k + i;
-                            if (px >= 0 && px < SW) g_px[py * SW + px] = color;
+                            const int qx = x + col * k + i;
+                            if (qx >= 0 && qx < pw) px[py * pw + qx] = color;
                         }
                     }
                 }
@@ -96,6 +99,8 @@ static void text(int x, int y, int k, const char *s, uint32_t color) {
         x += 6 * k;
     }
 }
+
+static void text(int x, int y, int k, const char *s, uint32_t color) { text_in(g_px, SW, SH, x, y, k, s, color); }
 
 void screen_line(const char *fmt, ...) {
     if (g_n == MAX_LINES) {
@@ -194,4 +199,208 @@ void screen_draw(const char *status) {
     if (g_gl == SCREEN_GE) pes6_ge_call(gl_present_job);
     else if (g_gl == SCREEN_FFP) pes6_ge_call(ffp_present_job);
     else raw_present();
+}
+
+/* ---- notices over the game's picture --------------------------------------------------------
+ * The savedata and message dialogs of the PSP complete at once here, with nothing on screen
+ * (psprecomp's misc.c): main.c says what happened through screen_notice, and the GE thread draws
+ * it over each frame until it expires: a dark box near the bottom, k = 2 text (12 px a letter). */
+
+#define NOTICE_W     900
+#define NOTICE_LINES 5
+#define NOTICE_CHARS ((NOTICE_W - 32) / 12)
+
+static atomic_flag g_nlock = ATOMIC_FLAG_INIT;
+static char g_ntext[640];
+static uint64_t g_nuntil;             /* sceKernelGetProcessTimeWide, us */
+static unsigned g_ngen;
+
+void screen_notice(unsigned ms, const char *fmt, ...) {
+    char t[sizeof g_ntext];
+    va_list ap;
+    va_start(ap, fmt);
+    vsnprintf(t, sizeof t, fmt, ap);
+    va_end(ap);
+    while (atomic_flag_test_and_set(&g_nlock)) {}
+    memcpy(g_ntext, t, sizeof t);
+    g_nuntil = sceKernelGetProcessTimeWide() + (uint64_t)ms * 1000u;
+    g_ngen++;
+    atomic_flag_clear(&g_nlock);
+}
+
+static int letters(const char *s, size_t n) {   /* the cells text_in draws: ASCII and U+00C0-00FF */
+    int c = 0;
+    for (size_t i = 0; i < n && s[i]; i++) c += (unsigned char)s[i] < 0x80 || (unsigned char)s[i] == 0xC3;
+    return c;
+}
+
+/* `t` in lines of at most NOTICE_CHARS letters, broken at spaces; returns how many. */
+static int wrap(const char *t, char out[NOTICE_LINES][NOTICE_CHARS * 2 + 1], int *longest) {
+    int n = 0;
+    *longest = 0;
+    while (*t && n < NOTICE_LINES) {
+        while (*t == ' ') t++;
+        if (!*t) break;
+        size_t take = 0, cut = 0;
+        while (t[take] && letters(t, take + 1) <= NOTICE_CHARS) {
+            take++;
+            if (t[take] == ' ' || !t[take]) cut = take;
+        }
+        if (!t[take]) cut = take;
+        if (!cut) cut = take;                    /* one word longer than a line */
+        while (cut && ((unsigned char)t[cut] & 0xC0) == 0x80) cut--;   /* not inside a letter */
+        if (!cut) break;
+        if (cut > NOTICE_CHARS * 2) cut = NOTICE_CHARS * 2;
+        memcpy(out[n], t, cut);
+        out[n][cut] = 0;
+        const int l = letters(out[n], cut);
+        if (l > *longest) *longest = l;
+        n++;
+        t += cut;
+    }
+    return n;
+}
+
+void screen_notice_draw(void) {
+    static uint32_t px[NOTICE_W * (NOTICE_LINES * 20 + 22)];
+    static unsigned drawn = ~0u;
+    static int w, h;
+    char t[sizeof g_ntext];
+    while (atomic_flag_test_and_set(&g_nlock)) {}
+    const uint64_t until = g_nuntil;
+    const unsigned gen = g_ngen;
+    if (gen != drawn) memcpy(t, g_ntext, sizeof t);
+    atomic_flag_clear(&g_nlock);
+    if (!until || sceKernelGetProcessTimeWide() >= until) return;
+    const int changed = gen != drawn;
+    if (changed) {
+        drawn = gen;
+        char lines[NOTICE_LINES][NOTICE_CHARS * 2 + 1];
+        int longest;
+        const int n = wrap(t, lines, &longest);
+        w = longest * 12 + 32;
+        if (w < 240) w = 240;
+        if (w > NOTICE_W) w = NOTICE_W;
+        h = (n ? n : 1) * 20 + 22;
+        for (int y = 0; y < h; y++)
+            for (int x = 0; x < w; x++)
+                px[y * w + x] = (x < 2 || y < 2 || x >= w - 2 || y >= h - 2) ? RGB(255, 215, 0) : RGB(16, 24, 44);
+        for (int i = 0; i < n; i++) {
+            const int lw = letters(lines[i], sizeof lines[i]) * 12;
+            text_in(px, w, h, (w - lw) / 2, 13 + i * 20, 2, lines[i], RGB(240, 240, 240));
+        }
+    }
+    pes6_ge_gl_overlay_image(0, px, w, h, changed, (SW - w) / 2, SH - h - 28, SW, SH);
+}
+
+/* ---- a list over the game's picture (the PSP's save / load dialog) --------------------------
+ * main.c keeps the list's state and sends each change; the GE thread draws it again when it
+ * changed: an 800 x 392 panel in the middle, six rows of two lines, the chosen one lit. Its
+ * picture (1.2 MB) is taken from the heap the first time, not kept in the BSS. */
+
+#define LIST_W     800
+#define LIST_ROWS  6
+#define LIST_ROW_H 48
+#define LIST_TOP   52
+#define LIST_H     (LIST_TOP + LIST_ROWS * LIST_ROW_H + 52)
+#define LIST_CHARS ((LIST_W - 48) / 12)
+
+static atomic_flag g_llock = ATOMIC_FLAG_INIT;
+static screen_list g_list, g_list_drawn;
+static int g_list_on;
+static unsigned g_list_gen;
+
+void screen_list_show(const screen_list *l) {
+    while (atomic_flag_test_and_set(&g_llock)) {}
+    g_list = *l;
+    g_list_on = 1;
+    g_list_gen++;
+    atomic_flag_clear(&g_llock);
+}
+
+void screen_list_hide(void) {
+    while (atomic_flag_test_and_set(&g_llock)) {}
+    g_list_on = 0;
+    g_list_gen++;
+    atomic_flag_clear(&g_llock);
+}
+
+static void fill(uint32_t *px, int pw, int ph, int x, int y, int w, int h, uint32_t c) {
+    for (int j = y; j < y + h; j++)
+        for (int i = x; i < x + w; i++)
+            if (i >= 0 && i < pw && j >= 0 && j < ph) px[j * pw + i] = c;
+}
+
+static void frame(uint32_t *px, int pw, int ph, int x, int y, int w, int h, uint32_t inside, uint32_t edge) {
+    fill(px, pw, ph, x, y, w, h, edge);
+    fill(px, pw, ph, x + 2, y + 2, w - 4, h - 4, inside);
+}
+
+/* `s` cut to `max` letters, "..." at the end when it did not fit. */
+static void fit(char *out, size_t cap, const char *s, int max) {
+    size_t i = 0;
+    int l = 0;
+    while (s[i] && i + 1 < cap) {
+        if (((unsigned char)s[i] & 0xC0) != 0x80 && ++l > max) break;
+        i++;
+    }
+    if (!s[i] || i + 1 >= cap) { memcpy(out, s, i); out[i] = 0; return; }
+    size_t k = i;                                     /* room for "..." */
+    for (int back = 0; back < 3 && k; ) { k--; if (((unsigned char)s[k] & 0xC0) != 0x80) back++; }
+    memcpy(out, s, k);
+    memcpy(out + k, "...", 4);
+}
+
+void screen_list_draw(void) {
+    static uint32_t *px;
+    static unsigned drawn = ~0u;
+    while (atomic_flag_test_and_set(&g_llock)) {}
+    const int on = g_list_on;
+    const unsigned gen = g_list_gen;
+    if (on && gen != drawn) g_list_drawn = g_list;
+    atomic_flag_clear(&g_llock);
+    if (!on) { drawn = gen; return; }
+    if (!px && !(px = malloc(sizeof *px * LIST_W * LIST_H))) return;
+    const int changed = gen != drawn;
+    if (changed) {
+        drawn = gen;
+        const screen_list *l = &g_list_drawn;
+        char s[200];
+        frame(px, LIST_W, LIST_H, 0, 0, LIST_W, LIST_H, RGB(16, 24, 44), RGB(255, 215, 0));
+        text_in(px, LIST_W, LIST_H, 24, 16, 3, l->heading, RGB(255, 215, 0));
+        if (l->n > LIST_ROWS) {
+            snprintf(s, sizeof s, "%d/%d", l->sel + 1, l->n);
+            text_in(px, LIST_W, LIST_H, LIST_W - 24 - letters(s, sizeof s) * 12, 20, 2, s, RGB(170, 180, 200));
+        }
+        int first = l->sel - LIST_ROWS / 2;
+        if (first > l->n - LIST_ROWS) first = l->n - LIST_ROWS;
+        if (first < 0) first = 0;
+        for (int i = first; i < l->n && i < first + LIST_ROWS; i++) {
+            const int y = LIST_TOP + (i - first) * LIST_ROW_H;
+            if (i == l->sel) frame(px, LIST_W, LIST_H, 12, y, LIST_W - 24, LIST_ROW_H - 2, RGB(70, 58, 14), RGB(255, 215, 0));
+            const int rl = letters(l->row[i].right, sizeof l->row[i].right);   /* the date, on the right */
+            if (rl) text_in(px, LIST_W, LIST_H, LIST_W - 24 - rl * 12, y + 8, 2, l->row[i].right, RGB(255, 215, 0));
+            fit(s, sizeof s, l->row[i].top, LIST_CHARS - (rl ? rl + 2 : 0));
+            text_in(px, LIST_W, LIST_H, 24, y + 8, 2, s, l->row[i].fresh ? RGB(150, 230, 150) : RGB(240, 240, 240));
+            fit(s, sizeof s, l->row[i].bottom, LIST_CHARS);
+            text_in(px, LIST_W, LIST_H, 24, y + 27, 2, s, RGB(170, 180, 200));
+        }
+        if (first > 0) text_in(px, LIST_W, LIST_H, LIST_W / 2 - 18, LIST_TOP - 16, 2, "...", RGB(255, 215, 0));
+        if (first + LIST_ROWS < l->n)
+            text_in(px, LIST_W, LIST_H, LIST_W / 2 - 18, LIST_TOP + LIST_ROWS * LIST_ROW_H + 2, 2, "...", RGB(255, 215, 0));
+        text_in(px, LIST_W, LIST_H, 24, LIST_H - 32, 2, l->hint, RGB(120, 200, 255));
+        if (l->question[0]) {                         /* the yes / no box over the rows */
+            int w = (letters(l->question, sizeof l->question) > letters(l->answers, sizeof l->answers)
+                     ? letters(l->question, sizeof l->question) : letters(l->answers, sizeof l->answers)) * 12 + 64;
+            if (w < 360) w = 360;
+            if (w > LIST_W - 40) w = LIST_W - 40;
+            const int h = 84, x = (LIST_W - w) / 2, y = (LIST_H - h) / 2;
+            frame(px, LIST_W, LIST_H, x, y, w, h, RGB(30, 40, 70), RGB(255, 215, 0));
+            fit(s, sizeof s, l->question, (w - 32) / 12);
+            text_in(px, LIST_W, LIST_H, x + (w - letters(s, sizeof s) * 12) / 2, y + 20, 2, s, RGB(240, 240, 240));
+            text_in(px, LIST_W, LIST_H, x + (w - letters(l->answers, sizeof l->answers) * 12) / 2, y + 50, 2, l->answers,
+                    RGB(120, 200, 255));
+        }
+    }
+    pes6_ge_gl_overlay_image(1, px, LIST_W, LIST_H, changed, (SW - LIST_W) / 2, (SH - LIST_H) / 2, SW, SH);
 }

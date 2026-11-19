@@ -8,7 +8,8 @@ set -euo pipefail
 B="$WORK/vita-build"
 mkdir -p "$B" "$REPO/out"
 bash "$(dirname "$0")/sync-upstream.sh"
-cmake -S "$REPO/port" -B "$B" -DPES6_UP="$UP" -DCMAKE_BUILD_TYPE=None -DPES6_GEN_OPT="${PES6_GEN_OPT:--O2}" -DPES6_PROF="${PES6_PROF:-OFF}" > "$B/configure.log" 2>&1 \
+bash "$(dirname "$0")/07-build-ffmpeg-vita.sh"
+cmake -S "$REPO/port" -B "$B" -DPES6_UP="$UP" -DPES6_FFMPEG="$WORK/ffmpeg-vita" -DCMAKE_BUILD_TYPE=None -DPES6_GEN_OPT="${PES6_GEN_OPT:--O2}" -DPES6_PROF="${PES6_PROF:-OFF}" > "$B/configure.log" 2>&1 \
   || { tail -30 "$B/configure.log"; exit 1; }
 target=all
 [ "${1:-}" = host ] && target=pes6_host

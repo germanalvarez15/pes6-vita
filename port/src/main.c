@@ -22,12 +22,14 @@
 #include <psprecomp/mem.h>
 
 #include "afs_mods.h"
+#include "at3.h"
 #include "atrac.h"
 #include "audio.h"
 #include "bench.h"
 #include "faces.h"
 #include "iso_eboot.h"
 #include "ge.h"
+#include "h264.h"
 #include "lang.h"
 #include "mpeg.h"
 #include "osk.h"
@@ -41,6 +43,7 @@
 #include "tuning.h"
 #include "version.h"
 
+#include <psp2/apputil.h>
 #include <psp2/audioout.h>
 #include <psp2/ctrl.h>
 #include <psp2/display.h>
@@ -49,6 +52,8 @@
 #include <psp2/kernel/processmgr.h>
 #include <psp2/kernel/threadmgr.h>
 #include <psp2/power.h>
+#include <psp2/rtc.h>
+#include <psp2/system_param.h>
 #include <vitaGL.h>
 
 #include <fcntl.h>
@@ -106,8 +111,13 @@ static uint64_t now_ns(void) { return (uint64_t)sceKernelGetProcessTimeWide() * 
  * L1/R1 bits as well. */
 
 static SceCtrlData g_pad;
+static int pick_blocks(void);
 static uint32_t vita_buttons(void) {
     sceCtrlPeekBufferPositive(0, &g_pad, 1);
+    if (pick_blocks()) {                                        /* the save list has them */
+        g_pad.lx = g_pad.ly = 128;
+        return 0;
+    }
     uint32_t b = g_pad.buttons & 0xF3F9u;                       /* select, start, d-pad, L, R, shapes */
     if (g_pad.buttons & SCE_CTRL_L1) b |= 0x100u;
     if (g_pad.buttons & SCE_CTRL_R1) b |= 0x200u;
@@ -286,6 +296,7 @@ static void pin(const char *what, int mask) {
 }
 static void sampler_pin(void) { pin("sampler", SCE_KERNEL_CPU_MASK_USER_2); }
 static void sas_pin(void) { pin("sound mix worker", SCE_KERNEL_CPU_MASK_USER_2); }
+static void atrac_pin(void) { pin("music decoder", SCE_KERNEL_CPU_MASK_USER_2); }
 
 /* vitaGL compiles shaders at run time with Sony's compiler, which users extract with ShaRKBR33D. */
 static int have_shader_compiler(void) {
@@ -371,6 +382,222 @@ static void stage_report(char *out, size_t size) {
         at += (size_t)snprintf(out + at, at < size ? size - at : 0, "%s%s %.0f", i ? ", " : "", NAME[i], d[i] * 100.0 / total);
 }
 
+/* ---- what the PSP's dialogs would have shown ---------------------------------------------------
+ * The savedata and message dialogs complete at once, with nothing on screen (psprecomp's misc.c):
+ * saving a cup looked like nothing happened. Their outcome is shown as a notice over the picture
+ * (screen.c). PES6_NOTICES=0 in env.txt: none, as before. */
+/* The notices and the save list speak the game's language, the one the player picks at every start
+ * (PES6_GAME_LANGUAGE, pes6_addrs.h); with any other value, the Vita's (lang.h). Accents are
+ * dropped when drawn (screen.c's font). */
+enum {
+    T_LOADED, T_NO_DATA, T_LOAD_FAIL, T_SAVED, T_SAVE_FAIL, T_DELETED, T_NO_DELETE, T_YES,
+    T_SAVE, T_DELETE, T_LOAD, T_HINT, T_NEW, T_NEW_SLOT, T_ASK_DELETE, T_ASK_OVER, T_YES_NO, T_COUNT
+};
+static const char *const TEXT[T_COUNT][PES6_GAME_LANGUAGES] = {   /* English, French, German, Italian, Spanish */
+    [T_LOADED]     = { "Data loaded", "Données chargées", "Daten geladen", "Dati caricati", "Datos cargados" },
+    [T_NO_DATA]    = { "No saved data", "Aucune donnée sauvegardée", "Keine gespeicherten Daten", "Nessun dato salvato",
+                       "No hay datos guardados" },
+    [T_LOAD_FAIL]  = { "Could not load the data (0x%08X)", "Impossible de charger les données (0x%08X)",
+                       "Daten konnten nicht geladen werden (0x%08X)", "Impossibile caricare i dati (0x%08X)",
+                       "No se pudieron cargar los datos (0x%08X)" },
+    [T_SAVED]      = { "Data saved", "Données sauvegardées", "Daten gespeichert", "Dati salvati", "Datos guardados" },
+    [T_SAVE_FAIL]  = { "Could not save the data (0x%08X)", "Impossible de sauvegarder les données (0x%08X)",
+                       "Daten konnten nicht gespeichert werden (0x%08X)", "Impossibile salvare i dati (0x%08X)",
+                       "No se pudieron guardar los datos (0x%08X)" },
+    [T_DELETED]    = { "Data deleted", "Données supprimées", "Daten gelöscht", "Dati eliminati", "Datos borrados" },
+    [T_NO_DELETE]  = { "No data to delete", "Aucune donnée à supprimer", "Keine Daten zum Löschen", "Nessun dato da eliminare",
+                       "No hay datos para borrar" },
+    [T_YES]        = { " (Yes)", " (Oui)", " (Ja)", " (Sì)", " (Sí)" },
+    [T_SAVE]       = { "Save data", "Sauvegarder", "Daten speichern", "Salva dati", "Guardar datos" },
+    [T_DELETE]     = { "Delete data", "Supprimer", "Daten löschen", "Elimina dati", "Borrar datos" },
+    [T_LOAD]       = { "Load data", "Charger", "Daten laden", "Carica dati", "Cargar datos" },
+    [T_HINT]       = { "Up/Down: choose   X: OK   O: back", "Haut/Bas : choisir   X : OK   O : retour",
+                       "Auf/Ab: wählen   X: OK   O: zurück", "Su/Giù: scegli   X: OK   O: indietro",
+                       "Arriba/Abajo: elegir   X: aceptar   O: volver" },
+    [T_NEW]        = { "New data", "Nouvelles données", "Neue Daten", "Nuovi dati", "Nuevos datos" },
+    [T_NEW_SLOT]   = { "Save in a new slot", "Sauvegarder dans un nouvel emplacement", "In einem neuen Platz speichern",
+                       "Salva in un nuovo slot", "Guardar en un espacio nuevo" },
+    [T_ASK_DELETE] = { "Delete this data?", "Supprimer ces données ?", "Diese Daten löschen?", "Eliminare questi dati?",
+                       "¿Borrar estos datos?" },
+    [T_ASK_OVER]   = { "Save over this data?", "Écraser ces données ?", "Diese Daten überschreiben?", "Sovrascrivere questi dati?",
+                       "¿Sobrescribir estos datos?" },
+    [T_YES_NO]     = { "X: yes   O: no", "X : oui   O : non", "X: ja   O: nein", "X: sì   O: no", "X: sí   O: no" },
+};
+
+static const char *T(int id) {
+    uint32_t g = psp_read32(PES6_GAME_LANGUAGE);
+    if (g >= PES6_GAME_LANGUAGES) g = pes6_lang == PES6_LANG_ES ? PES6_GAME_ES : PES6_GAME_EN;
+    return TEXT[id][g];
+}
+
+static void savedata_notice(uint32_t mode, uint32_t result) {
+    const unsigned r = (unsigned)result;
+    if (r == 1) return;                              /* the player backed out of the list */
+    switch (mode) {
+    case 2: case 4:                                  /* load, load from the list */
+        if (r == 0) screen_notice(2500, "%s", T(T_LOADED));
+        else if (r == 0x80110307u) screen_notice(3000, "%s", T(T_NO_DATA));
+        else screen_notice(4000, T(T_LOAD_FAIL), r);
+        break;
+    case 1: case 3: case 5:                          /* autosave, save, save from the list */
+        if (r == 0) screen_notice(2500, "%s", T(T_SAVED));
+        else screen_notice(4000, T(T_SAVE_FAIL), r);
+        break;
+    case 6: case 7:                                  /* delete */
+        if (r == 0) screen_notice(2500, "%s", T(T_DELETED));
+        else screen_notice(3000, "%s", T(T_NO_DELETE));
+        break;
+    default: break;                                  /* the Option File at boot, sizes: nothing */
+    }
+}
+
+static void msgdialog_notice(const char *text, int yes_no) {
+    screen_notice(yes_no ? 6000 : 5000, "%s%s", text, yes_no ? T(T_YES) : "");
+}
+
+/* ---- the PSP's save / load list ----------------------------------------------------------------
+ * A list request (Cup or League -> Load Data, Save) shows the game's slots, as the PSP's dialog:
+ * up / down (or the stick) and X pick one, O backs out; saving over a save, or deleting one,
+ * asks first. A save offers a new slot first, so there can be several cups. All of it runs on the
+ * game's thread (the HLE call, the vblank hook, the buttons the game reads): no locks here;
+ * screen.c draws it on the GE thread. While the list is up, and until every button is let go
+ * after it, the game gets no buttons. PES6_SAVEDATA_LIST=0 in env.txt: no list, as before. */
+static struct {
+    int on, mode, n, sel, asking, held;
+    uint32_t prev;                                   /* the buttons at the last vblank */
+    int exists[SCREEN_LIST_MAX];
+    screen_list l;
+} g_pick;
+static int g_pick_release;                           /* no buttons for the game until all let go */
+
+/* A save's two lines: its title and the first line of its detail, then the rest of the detail.
+ * A line after a label ("Time / Date Saved :") goes on the right of the first: the date. */
+static void pick_rows(const psp_savedata_slot *s, char *top, size_t tn, char *bottom, size_t bn, char *right, size_t rn) {
+    char d[sizeof s->detail];
+    snprintf(d, sizeof d, "%s", s->detail);
+    top[0] = bottom[0] = right[0] = 0;
+    int k = 0, labelled = 0;
+    for (char *line = strtok(d, "\n"); line; line = strtok(NULL, "\n")) {
+        while (*line == ' ') line++;
+        size_t len = strlen(line);
+        while (len && line[len - 1] == ' ') line[--len] = 0;
+        if (!len) continue;
+        if (line[len - 1] == ':') { labelled = 1; continue; }
+        if (labelled && !right[0]) { snprintf(right, rn, "%s", line); labelled = 0; continue; }
+        labelled = 0;
+        if (k++ == 0) {
+            snprintf(top, tn, "%s%s%s", s->title, s->title[0] ? " - " : "", line);
+        } else {
+            const size_t at = strlen(bottom);
+            snprintf(bottom + at, bn - at, "%s%s", at ? " - " : "", line);
+        }
+    }
+    if (!k) snprintf(top, tn, "%s", s->title[0] ? s->title : s->name);
+}
+
+static void pick_answer(int i) {
+    g_pick.on = 0;
+    g_pick_release = 1;
+    screen_list_hide();
+    fprintf(stderr, "[vita] save list: %s %d\n", i < 0 ? "backed out" : "chose", i);
+    psp_savedata_choose_answer(i);
+}
+
+static int savedata_choose(uint32_t mode, const psp_savedata_slot *slots, int n, int initial) {
+    if (!g_gl || n <= 0) return -1;
+    if (n > SCREEN_LIST_MAX) n = SCREEN_LIST_MAX;
+    memset(&g_pick.l, 0, sizeof g_pick.l);
+    snprintf(g_pick.l.heading, sizeof g_pick.l.heading, "%s",
+             mode == 5 ? T(T_SAVE) : mode == 6 ? T(T_DELETE) : T(T_LOAD));
+    snprintf(g_pick.l.hint, sizeof g_pick.l.hint, "%s", T(T_HINT));
+    for (int i = 0; i < n; i++) {
+        g_pick.exists[i] = slots[i].exists;
+        if (slots[i].exists) {
+            pick_rows(&slots[i], g_pick.l.row[i].top, sizeof g_pick.l.row[i].top, g_pick.l.row[i].bottom,
+                      sizeof g_pick.l.row[i].bottom, g_pick.l.row[i].right, sizeof g_pick.l.row[i].right);
+        } else {
+            snprintf(g_pick.l.row[i].top, sizeof g_pick.l.row[i].top, "%s", T(T_NEW));
+            snprintf(g_pick.l.row[i].bottom, sizeof g_pick.l.row[i].bottom, "%s", T(T_NEW_SLOT));
+            g_pick.l.row[i].fresh = 1;
+        }
+    }
+    g_pick.mode = (int)mode;
+    g_pick.n = g_pick.l.n = n;
+    g_pick.sel = g_pick.l.sel = initial >= 0 && initial < n ? initial : 0;
+    g_pick.asking = g_pick.held = 0;
+    SceCtrlData pad;
+    sceCtrlPeekBufferPositive(0, &pad, 1);
+    g_pick.prev = pad.buttons;                       /* the X that chose Save is not a pick */
+    g_pick.on = 1;
+    screen_list_show(&g_pick.l);
+    fprintf(stderr, "[vita] save list (mode %u): %d slot(s), on %d\n", mode, n, g_pick.sel);
+    return 0;
+}
+
+/* While the list is up, and after it until the buttons and the stick are let go. */
+static int pick_blocks(void) {
+    if (g_pick.on) return 1;
+    if (!g_pick_release) return 0;
+    if (g_pad.buttons == 0 && abs(g_pad.lx - 128) < 40 && abs(g_pad.ly - 128) < 40) g_pick_release = 0;
+    return g_pick_release;
+}
+
+/* Each vblank, with the pad as read there. */
+static void pick_vblank(const SceCtrlData *pad) {
+    if (!g_pick.on) return;
+    uint32_t b = pad->buttons;
+    if (pad->ly < 50) b |= SCE_CTRL_UP;
+    else if (pad->ly > 205) b |= SCE_CTRL_DOWN;
+    const uint32_t press = b & ~g_pick.prev;
+    g_pick.prev = b;
+    int move = 0;
+    if (b & (SCE_CTRL_UP | SCE_CTRL_DOWN)) {
+        const int again = ++g_pick.held > 24 && g_pick.held % 6 == 0;   /* held: repeats */
+        if ((press | (again ? b : 0)) & SCE_CTRL_UP) move = -1;
+        else if ((press | (again ? b : 0)) & SCE_CTRL_DOWN) move = 1;
+    } else {
+        g_pick.held = 0;
+    }
+    int changed = 0;
+    if (g_pick.asking) {
+        if (press & SCE_CTRL_CROSS) { pick_answer(g_pick.sel); return; }
+        if (press & SCE_CTRL_CIRCLE) { g_pick.asking = 0; g_pick.l.question[0] = 0; changed = 1; }
+    } else if (press & SCE_CTRL_CROSS) {
+        if ((g_pick.mode == 5 && g_pick.exists[g_pick.sel]) || g_pick.mode == 6) {
+            g_pick.asking = 1;
+            snprintf(g_pick.l.question, sizeof g_pick.l.question, "%s",
+                     g_pick.mode == 6 ? T(T_ASK_DELETE) : T(T_ASK_OVER));
+            snprintf(g_pick.l.answers, sizeof g_pick.l.answers, "%s", T(T_YES_NO));
+            changed = 1;
+        } else {
+            pick_answer(g_pick.sel);
+            return;
+        }
+    } else if (press & SCE_CTRL_CIRCLE) {
+        pick_answer(-1);
+        return;
+    } else if (move) {
+        const int s = g_pick.sel + move;
+        if (s >= 0 && s < g_pick.n) { g_pick.sel = s; changed = 1; }
+    }
+    if (changed) {
+        g_pick.l.sel = g_pick.sel;
+        screen_list_show(&g_pick.l);
+    }
+}
+
+/* The port's own text in Spanish on a Vita set to Spanish, English otherwise (lang.h). */
+static const char *vita_locale(void) {
+    SceAppUtilInitParam ip;
+    SceAppUtilBootParam bp;
+    memset(&ip, 0, sizeof ip);
+    memset(&bp, 0, sizeof bp);
+    sceAppUtilInit(&ip, &bp);                        /* already up: an error that changes nothing */
+    int lang = -1;
+    if (sceAppUtilSystemParamGetInt(SCE_SYSTEM_PARAM_ID_LANG, &lang) < 0) return "en";
+    return lang == SCE_SYSTEM_PARAM_LANG_SPANISH ? "es" : "en";
+}
+
 static void audio_start(void) {
     const SceUID th = sceKernelCreateThread("pes6_audio", audio_thread, 64, 64 * 1024, 0, SCE_KERNEL_CPU_MASK_USER_2, NULL);
     if (th >= 0) sceKernelStartThread(th, 0, NULL);
@@ -390,6 +617,8 @@ static void show_job(uint64_t fb_stride, uint64_t fmt) {
     pes6_ge_stage = PES6_GE_PRESENT;
     if (!pes6_ge_gl_present(fb, SCREEN_W, SCREEN_H) && pes6_ge_read_rgba(g_pixels, fb, stride, (int)fmt) == 0)
         pes6_ge_gl_present_pixels(g_pixels, SCREEN_W, SCREEN_H);    /* a buffer the game filled itself (movies) */
+    screen_list_draw();                                             /* the save list, over it */
+    screen_notice_draw();                                           /* "Data saved" and the like */
     const uint64_t t1 = now_ns();
     pes6_ge_stage = PES6_GE_SWAP;
     vglSwapBuffers(GL_FALSE);
@@ -427,6 +656,7 @@ static void on_vblank(void) {
     static uint64_t held_since;
     SceCtrlData pad;
     sceCtrlPeekBufferPositive(0, &pad, 1);
+    pick_vblank(&pad);                                              /* the save list, when it is up */
     const unsigned all = SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER | SCE_CTRL_START | SCE_CTRL_SELECT;
     if ((pad.buttons & all) == all) {
         if (!held_since) held_since = now_ns();
@@ -458,6 +688,17 @@ static void on_vblank(void) {
                 (gs->prims - prims0) / n, (gs->vertices - verts0) / n, (gs->commands - cmds0) / n, stages);
         fprintf(stderr, "[fps] pictures on screen for 1 vblank %u, 2 (30 fps) %u, 3 (a drop to 20) %u, 4+ %u; longest %u vblanks\n",
                 g_hold[1], g_hold[2], g_hold[3], g_hold[4], g_hold_max);
+        /* The music (ATRAC3plus): decoded ahead on core 2, what is left on the game's thread; the
+         * movies (H.264 and their sound) are decoded on the game's thread. */
+        static uint64_t at3_0, game_0, h264_0;
+        const uint64_t at3 = pes6_at3_ns, game = pes6_atrac_game_ns(), h264 = pes6_h264_ns;
+        fprintf(stderr, "[fps] a frame: music %.2f ms on the game's thread (ATRAC decoding %.2f ms on all cores), "
+                        "movie pictures %.2f ms%s\n",
+                (game - game_0) / 1e6 / n, (at3 - at3_0) / 1e6 / n, (h264 - h264_0) / 1e6 / n,
+                pes6_at3_available() ? "" : " (built without FFmpeg: no music, no movies)");
+        at3_0 = at3;
+        game_0 = game;
+        h264_0 = h264;
         memset(g_hold, 0, sizeof g_hold);
         g_hold_max = 0;
         prims0 = gs->prims;
@@ -546,6 +787,16 @@ static int game_thread(SceSize args, void *argp) {
     if (load_elf(elf) != 0) fatal("no se pudo cargar EBOOT.elf");
 
     psp_hle_init();
+    {
+        /* The PSP's clock from the Vita's local date and time, not psprecomp's fixed 2006 date:
+         * the game writes it in its saves. PES6_REAL_CLOCK=0 in env.txt: the 2006 date. */
+        const char *rc = getenv("PES6_REAL_CLOCK");
+        SceDateTime now;
+        if ((!rc || *rc != '0') && !getenv("PES6_CLOCK") && sceRtcGetCurrentClockLocalTime(&now) >= 0) {
+            psp_clock_set_start(now.year, now.month, now.day, now.hour, now.minute, now.second);
+            fprintf(stderr, "[vita] clock from %04u-%02u-%02u %02u:%02u\n", now.year, now.month, now.day, now.hour, now.minute);
+        }
+    }
     psp_io_set_root(getenv("PES6_IO_ROOT"));
     pes6_tuning_init(psp_io_root());
     pes6_tuning_apply_data("EBOOT.elf");
@@ -563,10 +814,23 @@ static int game_thread(SceSize args, void *argp) {
             fprintf(stderr, "[vita] sound mix worker: %d\n", rc);
         }
     }
+    /* The music's ATRAC3plus frames decoded ahead on core 2, not on the game's (atrac.c);
+     * PES6_ATRAC_AHEAD=0 in env.txt decodes them on the game's thread as before. */
+    fprintf(stderr, "[vita] music decoder ahead on core 2: %s\n", pes6_atrac_worker_start(atrac_pin) == 0 ? "on" : "off");
     pes6_input_extra_buttons = vita_buttons;
     pes6_input_extra_analog = vita_analog;
     pes6_input_init();
-    pes6_lang_init("en");
+    pes6_lang_init(vita_locale());
+    {
+        const char *s = getenv("PES6_NOTICES");
+        if (!s || *s != '0') {
+            psp_savedata_notice = savedata_notice;
+            psp_msgdialog_notice = msgdialog_notice;
+        }
+        psp_savedata_choose = savedata_choose;       /* off with PES6_SAVEDATA_LIST=0 (misc.c) */
+        fprintf(stderr, "[vita] language %s; notices for saving and loading: %s\n", pes6_lang == PES6_LANG_ES ? "es" : "en",
+                psp_savedata_notice ? "on" : "off");
+    }
 
     pes6_settings settings;
     pes6_settings_load(&settings, psp_io_root());

@@ -20,7 +20,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 set(VITA_APP_NAME "PES6 Vita")
 set(VITA_TITLEID  "PESV00006")
-set(VITA_VERSION  "00.01")
+set(VITA_VERSION  "00.02")
 # ATTRIBUTE2=12: the extended memory budget; the guest block alone is 128 MB.
 set(VITA_MKSFOEX_FLAGS "${VITA_MKSFOEX_FLAGS} -d PARENTAL_LEVEL=1 -d ATTRIBUTE2=12")
 
@@ -97,6 +97,19 @@ add_executable(pes6vita
     $<TARGET_OBJECTS:pes6_gen>
 )
 set_target_properties(pes6vita PROPERTIES LINKER_LANGUAGE CXX)
+
+# FFmpeg's H.264 and ATRAC3/ATRAC3plus decoders (scripts/07-build-ffmpeg-vita.sh): the game's music,
+# its movies and their sound (runtime/common/at3.c, h264.c). Without them both stay silent / black.
+set(PES6_FFMPEG "" CACHE PATH "FFmpeg built for the Vita (07-build-ffmpeg-vita.sh output)")
+if(PES6_FFMPEG AND EXISTS "${PES6_FFMPEG}/lib/libavcodec.a")
+    target_include_directories(pes6_host BEFORE PRIVATE "${PES6_FFMPEG}/include")
+    target_compile_definitions(pes6_host PRIVATE PES6_HAVE_FFMPEG)
+    target_link_libraries(pes6vita PRIVATE
+        "${PES6_FFMPEG}/lib/libavcodec.a" "${PES6_FFMPEG}/lib/libswscale.a" "${PES6_FFMPEG}/lib/libavutil.a")
+    message(STATUS "FFmpeg: ${PES6_FFMPEG}")
+else()
+    message(WARNING "no FFmpeg (PES6_FFMPEG=${PES6_FFMPEG}): no music and no movies")
+endif()
 set_source_files_properties(${GEN_OVL}/overlays_registry.c PROPERTIES COMPILE_OPTIONS "-O1")
 set_source_files_properties("${PES6_UP}/third_party/pspdecrypt/PrxDecrypter.cpp" "${PES6_UP}/third_party/pspdecrypt/pspdecrypt_shim.cpp"
     PROPERTIES COMPILE_OPTIONS "-std=c++17;-O2")

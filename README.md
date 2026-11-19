@@ -14,6 +14,8 @@ An unofficial port of *Pro Evolution Soccer 6* (PSP, Europe, ULES00476) to the P
 - **Renders at the Vita's native 960x544 resolution** through vitaGL, instead of the PSP's 480x272.
 - **Native audio and controls.**
 - **The match at 30 fps** at the Vita's standard 444 MHz.
+- **Music:** the menu music and the game's songs.
+- **Several saves, as on the PSP:** saving or loading opens a list of your saves, in the language you pick when the game starts, with the Vita's date and time.
 
 ## What you need
 
@@ -55,6 +57,7 @@ Found a bug or a crash? Please open an issue in the [Issues](../../issues) tab o
 - **The game stops with a message about `pes6.iso`:** check that it is at `ux0:data/pes6vita/pes6.iso`, with that exact name.
 - **The game freezes or closes on the first start:** check that your ISO is the European version, ULES00476. Other versions do not work.
 - **Something looks or runs worse than in the previous version:** create the text file `ux0:data/pes6vita/env.txt` with the line `PES6_GE_BEHIND=0`, start the game again and tell us in an issue whether that fixes it.
+- **Saving or loading goes wrong:** add the line `PES6_SAVEDATA_LIST=0` to `ux0:data/pes6vita/env.txt`. The save list is then skipped and each mode keeps a single save, as in 0.0.1-beta. Please tell us in an issue.
 
 ## Legal notice
 
@@ -63,4 +66,5 @@ This project is not affiliated with or endorsed by Konami. *Pro Evolution Soccer
 ## Credits
 
 - [VitaSDK](https://vitasdk.org) and [vitaGL](https://github.com/Rinnegatamante/vitaGL): toolchain and renderer.
+- [FFmpeg](https://ffmpeg.org) (LGPL 2.1): the game's music is decoded with it. `scripts/07-build-ffmpeg-vita.sh` downloads its source and builds the part the port uses.
 - To [haveniiii's PES6ANDROIDPORT](https://github.com/haveniiii/PES6ANDROIDPORT), which served as the starting point for this port.
