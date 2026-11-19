@@ -16,6 +16,7 @@ An unofficial port of *Pro Evolution Soccer 6* (PSP, Europe, ULES00476) to the P
 - **The match at 30 fps** at the Vita's standard 444 MHz.
 - **Music:** the menu music and the game's songs.
 - **Several saves, as on the PSP:** saving or loading opens a list of your saves, in the language you pick when the game starts, with the Vita's date and time.
+- **Match commentary** (optional): the PSP version has none, so the port plays the commentary of the PS2 version from your own copy. See [Match commentary](#match-commentary).
 
 ## What you need
 
@@ -35,6 +36,19 @@ An unofficial port of *Pro Evolution Soccer 6* (PSP, Europe, ULES00476) to the P
 ### Updating from an earlier version
 
 Install the new `pes6vita.vpk` over the old one. Your ISO and your saves in `ux0:data/pes6vita/` stay where they are.
+
+## Match commentary
+
+The PSP version has no commentary. The port can play the commentary of **Pro Evolution Soccer 6 for PS2** during the match, taken from your own copy of the PS2 game. It must be PES6: banks from other PES games (2008, 2009, 2010…) do not work.
+
+1. Open your PES6 PS2 ISO on a computer, for example with 7-Zip.
+2. Extract the commentary file from the root of the disc:
+   - `S_SOUND.AFS` for Spanish (Juan Carlos Rivero and Iñaki Cano), about 420 MB, from the European (PAL) version;
+   - `E_SOUND.AFS` for English (Peter Brackley and Trevor Brooking), from the European (PAL) version.
+3. Copy it to the Vita as `ux0:data/pes6vita/audio/s_sound.afs` or `ux0:data/pes6vita/audio/e_sound.afs`, in lower case. Create the `audio` folder if it does not exist.
+4. Start the game and play a match with commentary turned on in the game's settings.
+
+If both files are there, the game in Spanish uses `s_sound.afs` and any other language `e_sound.afs`. To turn the commentary off completely, add the line `PES6_COMMENTARY=0` to `ux0:data/pes6vita/env.txt`.
 
 ## Controls
 

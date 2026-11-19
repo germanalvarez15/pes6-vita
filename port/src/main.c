@@ -22,6 +22,7 @@
 #include <psprecomp/mem.h>
 
 #include "afs_mods.h"
+#include "commentary.h"
 #include "at3.h"
 #include "atrac.h"
 #include "audio.h"
@@ -192,6 +193,41 @@ static void on_miss(uint32_t addr) {
     finish(why);
 }
 static void on_bench_done(void) { finish("medicion completa"); }
+
+/* Commentary (upstream docs/24): the player copies a PS2 PAL bank to DATA_DIR/audio, s_sound.afs
+ * (Spanish) or e_sound.afs (English); the catalogue (clip numbers only) comes in the VPK,
+ * app0:catalogues/<bank>.txt. The game in Spanish prefers s_sound, any other e_sound; either is taken
+ * if it is the only one. Player names: DATA_DIR/audio/names.afs (an original s_sound.afs), else the
+ * bank says them. PES6_COMMENTARY=0 turns it off, PES6_COMMENTARY=<path to a bank> picks one.
+ * The menu's Commentary setting turns it on or off as on the other hosts. */
+static void commentary_task(void) { pes6_commentary_frame(); }
+
+static void setup_commentary(void) {
+    const char *env = getenv("PES6_COMMENTARY");
+    if (env && !strcmp(env, "0")) { fprintf(stderr, "[commentary] off (PES6_COMMENTARY=0)\n"); return; }
+    const char *order[2] = { "s_sound", "e_sound" };
+    if (pes6_lang != PES6_LANG_ES) { order[0] = "e_sound"; order[1] = "s_sound"; }
+    char afs[512] = "", cat[512] = "";
+    for (int i = 0; i < 2 && !cat[0]; i++) {
+        if (env && *env) {
+            if (!strstr(env, order[i])) continue;
+            snprintf(afs, sizeof afs, "%s", env);
+        } else snprintf(afs, sizeof afs, DATA_DIR "/audio/%s.afs", order[i]);
+        FILE *t = fopen(afs, "rb");
+        if (!t) continue;
+        fclose(t);
+        snprintf(cat, sizeof cat, "app0:catalogues/%s.txt", order[i]);
+    }
+    if (!cat[0]) { fprintf(stderr, "[commentary] no bank in " DATA_DIR "/audio\n"); return; }
+    if (pes6_commentary_open(afs, cat) != 0) { fprintf(stderr, "[commentary] %s: could not open it\n", afs); return; }
+    const char *gs = getenv("PES6_GOAL_SHOUT");      /* the PSP's own goal shout goes quiet (docs/39 §2.1) */
+    if (!(gs && *gs == '1')) pes6_afs_goal_voice_off();
+    pes6_commentary_set_enabled(pes6_settings_current.commentary);
+    FILE *n = fopen(DATA_DIR "/audio/names.afs", "rb");
+    if (n) { fclose(n); pes6_commentary_open_names(DATA_DIR "/audio/names.afs"); }
+    psp_add_vblank_task(commentary_task);
+    fprintf(stderr, "[commentary] %s with %s%s\n", afs, cat, n ? ", names from names.afs" : "");
+}
 
 static void fatal(const char *msg) {
     fprintf(stderr, "[vita] fatal: %s\n", msg);
@@ -856,6 +892,7 @@ static int game_thread(SceSize args, void *argp) {
     pes6_mpeg_init();
     pes6_atrac_init();
     pes6_audio_init();
+    setup_commentary();
     pes6_osk_init();
     pes6_bench_done = on_bench_done;
     pes6_bench_init();

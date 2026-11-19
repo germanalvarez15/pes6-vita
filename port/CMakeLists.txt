@@ -20,7 +20,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 set(VITA_APP_NAME "PES6 Vita")
 set(VITA_TITLEID  "PESV00006")
-set(VITA_VERSION  "00.02")
+set(VITA_VERSION  "00.03")
 # ATTRIBUTE2=12: the extended memory budget; the guest block alone is 128 MB.
 set(VITA_MKSFOEX_FLAGS "${VITA_MKSFOEX_FLAGS} -d PARENTAL_LEVEL=1 -d ATTRIBUTE2=12")
 
@@ -132,9 +132,18 @@ target_link_options(pes6vita PRIVATE -Wl,--wrap=fopen -Wl,--wrap=fclose -Wl,-u,_
 
 vita_create_self(eboot.bin pes6vita UNSAFE)
 # LiveArea art (8-bit palette PNGs, made by tools/livearea.py), as the NFS port's CMakeLists.txt.
+# Commentary catalogues (clip numbers only, no sound): port/catalogues/<bank>.txt -> app0:catalogues/.
+# The PS2 bank itself is never in the VPK: the player copies it (main.c, setup_commentary).
+set(CATALOGUE_FILES)
+foreach(bank s_sound e_sound)
+    if(EXISTS "${CMAKE_SOURCE_DIR}/catalogues/${bank}.txt")
+        list(APPEND CATALOGUE_FILES FILE "${CMAKE_SOURCE_DIR}/catalogues/${bank}.txt" "catalogues/${bank}.txt")
+    endif()
+endforeach()
 vita_create_vpk(pes6vita.vpk ${VITA_TITLEID} eboot.bin
     VERSION ${VITA_VERSION}
     NAME ${VITA_APP_NAME}
+    ${CATALOGUE_FILES}
     FILE sce_sys/icon0.png sce_sys/icon0.png
     FILE sce_sys/livearea/contents/bg.png sce_sys/livearea/contents/bg.png
     FILE sce_sys/livearea/contents/startup.png sce_sys/livearea/contents/startup.png
