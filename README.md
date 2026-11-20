@@ -44,7 +44,7 @@ The PSP version of PES6 only came with a single stadium, even though Konami left
 
 ### Easy way: Browser Helper (no installation required)
 
-Open the **[Web Helper](docs/index.html)** *(100% private and local — everything runs inside your browser; your ISO is never uploaded anywhere)*:
+Open the **[Web Helper](https://germanalvarez15.github.io/pes6-vita/)** *(100% private and local — everything runs inside your browser; your ISO is never uploaded anywhere)*:
 
 1. Stay on the **38 Official Stadiums** tab and drop your PSP `pes6.iso` (`ULES00476`).
 2. Select the stadiums you want (or click **All (38)** / **Popular (14)**) and press **Convert & Download for PS Vita**.
@@ -84,7 +84,7 @@ The PSP version has no commentary. The port plays **Pro Evolution Soccer 6** com
 
 ### Option A — From your PES6 PS2 ISO (no 7-Zip needed)
 
-1. Open the **[Web Helper](docs/index.html)** and go to the **Commentary (Stock & Patches)** tab.
+1. Open the **[Web Helper](https://germanalvarez15.github.io/pes6-vita/)** and go to the **Commentary (Stock & Patches)** tab.
 2. Drop your PES6 PS2 ISO. The page detects the commentary files inside the disc (`e_sound.afs` for English, `s_sound.afs` for Spanish) and lets you extract them with one click.
    *(You can also extract `E_SOUND.AFS` or `S_SOUND.AFS` manually from the root of the PS2 ISO using 7-Zip.)*
 
