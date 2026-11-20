@@ -145,10 +145,12 @@ h1 {
 }
 
 .dropzone {
+  display: block;
+  width: 100%;
   border: 2px dashed var(--border);
   background: rgba(11, 18, 32, 0.55);
   border-radius: var(--radius);
-  padding: 26px 18px;
+  padding: 28px 18px;
   text-align: center;
   cursor: pointer;
   transition: border-color 0.15s, background 0.15s;
