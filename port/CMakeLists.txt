@@ -20,7 +20,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 set(VITA_APP_NAME "PES6 Vita")
 set(VITA_TITLEID  "PESV00006")
-set(VITA_VERSION  "00.03")
+set(VITA_VERSION  "00.04")
 # ATTRIBUTE2=12: the extended memory budget; the guest block alone is 128 MB.
 set(VITA_MKSFOEX_FLAGS "${VITA_MKSFOEX_FLAGS} -d PARENTAL_LEVEL=1 -d ATTRIBUTE2=12")
 
@@ -81,6 +81,7 @@ set(RUNTIME_SOURCES
 # The hand-written part (host + runtime) on its own, so `--target pes6_host` checks it in seconds.
 add_library(pes6_host OBJECT
     src/main.c
+    src/stadiums.c
     src/stubs.c
     src/screen.c
     src/vita_stdio_lock.c

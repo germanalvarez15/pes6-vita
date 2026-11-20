@@ -3,8 +3,8 @@
 set -uo pipefail
 . "$(dirname "$0")/env.sh"
 bash "$(dirname "$0")/sync-upstream.sh" >/dev/null
-files=("$REPO/port/src/main.c" "$REPO/port/src/stubs.c" "$REPO/port/src/screen.c" "$REPO/port/src/vita_stdio_lock.c" "$UP/runtime/common/ge.c" "$UP/runtime/common/bench.c"
-       "$UP/runtime/common/sampler.c" "$UP/third_party/psprecomp/src/hle/hle.c"
+files=("$REPO/port/src/main.c" "$REPO/port/src/stadiums.c" "$REPO/port/src/stubs.c" "$REPO/port/src/screen.c" "$REPO/port/src/vita_stdio_lock.c" "$UP/runtime/common/ge.c" "$UP/runtime/common/bench.c"
+       "$UP/runtime/common/sampler.c" "$UP/third_party/psprecomp/src/hle/hle.c" "$UP/third_party/psprecomp/src/hle/iofilemgr.c"
        "$UP/third_party/psprecomp/src/mem.c" "$UP/third_party/psprecomp/src/hle/threadman.c"
        "$UP/third_party/psprecomp/src/hle/sascore.c")
 for f in "${files[@]}"; do

@@ -1,0 +1,160 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>PES6 PS Vita — Stadiums &amp; Commentary Helper</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <div class="wrap">
+    <header>
+      <div>
+        <h1>PES6 PS Vita — Stadiums &amp; Commentary Helper</h1>
+        <p class="subtitle">Convert stadiums and verify commentary banks directly in your browser — no installation required.</p>
+      </div>
+    </header>
+
+    <div class="privacy-banner">
+      🔒 <strong>100% private &amp; local:</strong> everything runs inside your own browser. Your ISO and files are never uploaded to any server.
+    </div>
+
+    <nav class="tabs">
+      <button class="tab-btn active" data-tab="official">🏟️ 38 Official Stadiums</button>
+      <button class="tab-btn" data-tab="patch">🧩 Import Stadium (PS2 Patch)</button>
+      <button class="tab-btn" data-tab="commentary">🎙️ Commentary (Stock &amp; Patches)</button>
+    </nav>
+
+    <!-- TAB 1: OFFICIAL 38 STADIUMS FROM PSP ISO -->
+    <section id="tab-official" class="panel active">
+      <div class="card">
+        <h2><span class="step-badge">STEP 1</span> Select your PSP <code>pes6.iso</code></h2>
+        <p class="hint">Use your own European copy of Pro Evolution Soccer 6 for PSP (<code>ULES00476</code>). All 38 PS2 stadiums are already inside — no extra files or PS2 disc required.</p>
+        <label class="dropzone" id="dz-psp">
+          <input type="file" id="file-psp" accept=".iso">
+          <div class="dz-title">Drop your pes6.iso here or click to browse</div>
+          <div class="dz-sub">Reads only the needed slices (never loads the full 1.3 GB into memory)</div>
+        </label>
+        <div id="status-psp" class="status"></div>
+      </div>
+
+      <div class="card">
+        <h2><span class="step-badge">STEP 2</span> Choose which stadiums to convert</h2>
+        <p class="hint">Every stadium includes Day &amp; Night lighting, 3D goalposts, pitch-side adboards, and all 3 crowd densities (Low, Normal, and High).</p>
+
+        <div class="toolbar">
+          <input type="search" id="search-stadium" class="search-input" placeholder="Search stadium or team (e.g. Bernabeu, Boca, Milan)...">
+          <button class="btn" id="btn-all">All (38)</button>
+          <button class="btn" id="btn-pop">Popular (14)</button>
+          <button class="btn" id="btn-none">None</button>
+        </div>
+
+        <div id="stadium-grid" class="stadium-grid"></div>
+
+        <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px;">
+          <span id="sel-count" style="color:var(--muted); font-size:0.9rem;"></span>
+          <button class="btn btn-primary" id="btn-convert-official" disabled>Convert &amp; Download for PS Vita</button>
+        </div>
+
+        <div id="prog-official" class="progress-wrap">
+          <div class="progress-bar"><div id="prog-official-fill" class="progress-fill"></div></div>
+          <div id="prog-official-text" class="progress-text"></div>
+        </div>
+        <div id="status-official" class="status"></div>
+      </div>
+    </section>
+
+    <!-- TAB 2: COMMUNITY PS2 PATCH STADIUMS -->
+    <section id="tab-patch" class="panel">
+      <div class="card">
+        <h2>Import stadiums from community PES6 PS2 patches</h2>
+        <p class="hint">Convert custom stadiums made for PES6 on PS2 and automatically verify that they fit PS Vita memory limits before copying them to your console.</p>
+
+        <div class="compat-note">
+          <span class="pill pill-ok">✅ Supported: patched PES6 PS2 ISO, PS2 0_TEXT.AFS, or PS2 stadium .bin</span>
+          <span class="pill pill-no">❌ Not supported: PES6 PC stadiums (Kitserver / Stadium Server)</span>
+        </div>
+
+        <div id="patch-psp-note" class="status info show">
+          ℹ️ First load your PSP <code>pes6.iso</code> in the <strong>38 Official Stadiums</strong> tab (used only as a template for 3D goalposts and pitch adboards).
+        </div>
+
+        <div style="margin-top:14px;">
+          <label class="dropzone" id="dz-ps2">
+            <input type="file" id="file-ps2" accept=".iso,.afs,.bin">
+            <div class="dz-title">Drop your patched PES6 PS2 ISO, 0_TEXT.AFS, or loose PS2 stadium .bin</div>
+            <div class="dz-sub">Supports PS2 ISO, full 0_TEXT.AFS, or an individual PS2 stadium .bin (day)</div>
+          </label>
+          <div id="status-ps2" class="status"></div>
+        </div>
+
+        <div id="patch-controls" style="display:none; margin-top:16px;">
+          <div class="form-grid">
+            <div class="field" id="patch-slot-wrap">
+              <label for="patch-src-slot">Stadium slot to extract from the PS2 patch:</label>
+              <select id="patch-src-slot" class="select-input"></select>
+            </div>
+            <div class="field">
+              <label for="patch-out-slot">Save as (Match Settings slot on PS Vita):</label>
+              <select id="patch-out-slot" class="select-input"></select>
+            </div>
+          </div>
+          <div class="field" id="patch-custom-name-wrap" style="display:none; margin-bottom:12px;">
+            <label for="patch-custom-name">Output .bin filename (no spaces, e.g. monumental):</label>
+            <input type="text" id="patch-custom-name" class="text-input" placeholder="monumental">
+          </div>
+          <button class="btn btn-primary" id="btn-convert-patch">Convert, Validate &amp; Download .bin</button>
+          <div id="status-patch-result" class="status"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- TAB 3: COMMENTARY VALIDATOR & PS2 ISO EXTRACTOR -->
+    <section id="tab-commentary" class="panel">
+      <div class="card">
+        <h2>Verify or extract commentary (Stock &amp; Community Patches)</h2>
+        <p class="hint">Use stock PES6 PS2 commentary or community commentary packs made for PES6. If you have a PES6 PS2 ISO, you can also extract <code>s_sound.afs</code> / <code>e_sound.afs</code> directly here without 7-Zip.</p>
+
+        <div class="compat-note">
+          <span class="pill pill-ok">✅ Supported: PES6 S_SOUND.AFS / E_SOUND.AFS (PS2 or PC) in CRI ADX format</span>
+          <span class="pill pill-no">❌ Not supported: PES 2008/2009/2010+, loose MP3/WAV, or PSP ISO</span>
+        </div>
+
+        <label class="dropzone" id="dz-comm">
+          <input type="file" id="file-comm" accept=".afs,.iso">
+          <div class="dz-title">Drop your s_sound.afs / e_sound.afs (or your PES6 PS2 ISO)</div>
+          <div class="dz-sub">Reads headers only — verification takes less than 1 second</div>
+        </label>
+
+        <div id="status-comm" class="status"></div>
+        <div id="comm-iso-list" class="sound-list"></div>
+      </div>
+    </section>
+
+    <!-- FOLDER CHEATSHEET -->
+    <div class="card">
+      <h2>📁 Where to copy each file on your PS Vita (with VitaShell)</h2>
+      <p class="hint">Connect your PS Vita to your PC over USB or FTP in VitaShell and place the files like this:</p>
+      <div class="folder-box">ux0:data/pes6vita/
+├── pes6.iso                ← Your European PES6 PSP ISO (ULES00476)
+├── audio/
+│   ├── e_sound.afs         ← English commentary (PS2 stock or PES6 patch, optional)
+│   └── s_sound.afs         ← Spanish commentary (PS2 stock or PES6 patch, optional)
+└── stadiums/
+    ├── bernabeu.bin        ← Converted stadiums from this page
+    ├── bombonera.bin
+    ├── camp_nou.bin
+    └── ...                 (up to all 38 stadiums)</div>
+      <p class="hint" style="margin:12px 0 0;">
+        🎮 <strong>In-game:</strong> before kick-off open <em>Match Settings</em> → <strong>Stadium</strong> and <strong>Attendance</strong> (No / Low / Normal / High). Leave Stadium on <em>Random</em> to automatically match the home team's stadium.
+      </p>
+    </div>
+
+    <footer>
+      This project does not include or distribute Konami game data. You need your own legal copies of the game.
+    </footer>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>

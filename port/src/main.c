@@ -41,6 +41,7 @@
 #include "sampler.h"
 #include "screen.h"
 #include "settings.h"
+#include "stadiums.h"
 #include "tuning.h"
 #include "version.h"
 
@@ -115,7 +116,7 @@ static SceCtrlData g_pad;
 static int pick_blocks(void);
 static uint32_t vita_buttons(void) {
     sceCtrlPeekBufferPositive(0, &g_pad, 1);
-    if (pick_blocks()) {                                        /* the save list has them */
+    if (pick_blocks() || stadiums_blocks_input()) {             /* an overlay list has them */
         g_pad.lx = g_pad.ly = 128;
         return 0;
     }
@@ -693,6 +694,7 @@ static void on_vblank(void) {
     SceCtrlData pad;
     sceCtrlPeekBufferPositive(0, &pad, 1);
     pick_vblank(&pad);                                              /* the save list, when it is up */
+    stadiums_vblank(&pad, g_pick.on);                               /* stadium picker & auto home team */
     const unsigned all = SCE_CTRL_LTRIGGER | SCE_CTRL_RTRIGGER | SCE_CTRL_START | SCE_CTRL_SELECT;
     if ((pad.buttons & all) == all) {
         if (!held_since) held_since = now_ns();
@@ -881,6 +883,7 @@ static int game_thread(SceSize args, void *argp) {
         if (i < 0) i = 0;
         if (n == 0 || pes6_version_apply(&v[i], psp_io_root(), mods) != 0) fatal("no se pudo preparar la version del juego");
     }
+    stadiums_init();
     /* Players' own faces come only with a patch (mods/<id>/faces, faces.c; the version above sets
      * PES6_MOD). Without one the hooks still cost: every model the game draws walks the players
      * and posts to the GE, and every new texture is named by its texels for the swap. */

@@ -16,7 +16,8 @@ An unofficial port of *Pro Evolution Soccer 6* (PSP, Europe, ULES00476) to the P
 - **The match at 30 fps** at the Vita's standard 444 MHz.
 - **Music:** the menu music and the game's songs.
 - **Several saves, as on the PSP:** saving or loading opens a list of your saves, in the language you pick when the game starts, with the Vita's date and time.
-- **Match commentary** (optional): the PSP version has none, so the port plays the commentary of the PS2 version from your own copy. See [Match commentary](#match-commentary).
+- **All 38 PS2 stadiums & crowd attendance** (optional): restore all 38 PS2 PES6 stadiums (Camp Nou, Santiago Bernabéu, La Bombonera, San Siro, Old Trafford, Anfield, and more) with Day/Night lighting, 3D goalposts, pitch adboards, and a native **Stadium** and **Attendance** selector inside Match Settings. See [Stadiums and attendance](#stadiums-and-attendance).
+- **Match commentary** (optional): the PSP version has none, so the port plays PES6 PS2 or community PES6 commentary banks. See [Match commentary](#match-commentary).
 
 ## What you need
 
@@ -35,20 +36,87 @@ An unofficial port of *Pro Evolution Soccer 6* (PSP, Europe, ULES00476) to the P
 
 ### Updating from an earlier version
 
-Install the new `pes6vita.vpk` over the old one. Your ISO and your saves in `ux0:data/pes6vita/` stay where they are.
+Install the new `pes6vita.vpk` over the old one. Your ISO, saves, stadiums, and commentary in `ux0:data/pes6vita/` stay where they are.
+
+## Stadiums and attendance
+
+The PSP version of PES6 only came with a single stadium, even though Konami left all **38 PS2 stadiums** inside your European PSP ISO (`ULES00476`). You do **not** need a PS2 disc or any downloads to unlock them.
+
+### Easy way: Browser Helper (no installation required)
+
+Open the **[Web Helper](docs/index.html)** *(100% private and local — everything runs inside your browser; your ISO is never uploaded anywhere)*:
+
+1. Stay on the **38 Official Stadiums** tab and drop your PSP `pes6.iso` (`ULES00476`).
+2. Select the stadiums you want (or click **All (38)** / **Popular (14)**) and press **Convert & Download for PS Vita**.
+3. Unzip the downloaded `stadiums.zip` file. Inside you will find `.bin` files such as `bernabeu.bin`, `bombonera.bin`, `camp_nou.bin`, and `san_siro.bin`.
+4. Connect your Vita to your computer with VitaShell (USB or FTP) and copy the `.bin` files into:
+   ```text
+   ux0:data/pes6vita/stadiums/
+   ```
+   *(Create the `stadiums` folder in lowercase if it does not exist.)*
+
+*(Command-line alternative: `python3 tools/convert_stadium.py --iso pes6.iso --all --out out/stadiums`.)*
+
+### Choosing stadium and crowd size in-game
+
+1. Before starting any match, open **Match Settings**.
+2. **Stadium:** press Left/Right to pick any installed stadium. Leave it on **Random** to automatically match the home team's stadium.
+3. **Attendance:** press Left/Right to choose how full the stands are: **No** (empty), **Low**, **Normal**, or **High** (packed).
+
+*(Optional: you can also press **L + R + Triangle** in menus outside a match to open a quick stadium picker, including any custom-named `.bin` files.)*
+
+### Importing stadiums from community PES6 PS2 patches
+
+If you have a community **PES6 PS2** patch (a patched PS2 ISO, a PS2 `0_TEXT.AFS`, or a standalone PS2 stadium `.bin`):
+
+1. Load your PSP `pes6.iso` in the **38 Official Stadiums** tab first (used only as a template for 3D goalposts and pitch adboards).
+2. Switch to the **Import Stadium (PS2 Patch)** tab and drop your PS2 patch file.
+3. Pick which stadium to extract and which Vita slot to save it as (replacing one of the 36 slots makes it appear directly in Match Settings; choosing a custom name makes it selectable with **L + R + Triangle**).
+4. The tool converts the stadium, automatically checks Vita memory limits so it will not crash your console, and downloads the ready-to-copy `.bin` file for `ux0:data/pes6vita/stadiums/`.
+
+> **Note:** Only **PES6 PS2** stadiums are supported. Stadiums made for **PES6 PC (Kitserver / Stadium Server)** use a different format and will not work.
+
+To disable custom stadiums completely, add `PES6_STADIUM=0` to `ux0:data/pes6vita/env.txt`. You can also set the default crowd level with `PES6_CROWD=0..3` (default `3` = High).
 
 ## Match commentary
 
-The PSP version has no commentary. The port can play the commentary of **Pro Evolution Soccer 6 for PS2** during the match, taken from your own copy of the PS2 game. It must be PES6: banks from other PES games (2008, 2009, 2010…) do not work.
+The PSP version has no commentary. The port plays **Pro Evolution Soccer 6** commentary banks in `.afs` format — both the **original PES6 PS2** commentary and **community commentary patches made for PES6** (PS2 or PC `s_sound.afs` / `e_sound.afs` packs). Banks from other PES games (2008, 2009, 2010…) or loose MP3/WAV files do not work.
 
-1. Open your PES6 PS2 ISO on a computer, for example with 7-Zip.
-2. Extract the commentary file from the root of the disc:
-   - `S_SOUND.AFS` for Spanish (Juan Carlos Rivero and Iñaki Cano), about 420 MB, from the European (PAL) version;
-   - `E_SOUND.AFS` for English (Peter Brackley and Trevor Brooking), from the European (PAL) version.
-3. Copy it to the Vita as `ux0:data/pes6vita/audio/s_sound.afs` or `ux0:data/pes6vita/audio/e_sound.afs`, in lower case. Create the `audio` folder if it does not exist.
-4. Start the game and play a match with commentary turned on in the game's settings.
+### Option A — From your PES6 PS2 ISO (no 7-Zip needed)
 
-If both files are there, the game in Spanish uses `s_sound.afs` and any other language `e_sound.afs`. To turn the commentary off completely, add the line `PES6_COMMENTARY=0` to `ux0:data/pes6vita/env.txt`.
+1. Open the **[Web Helper](docs/index.html)** and go to the **Commentary (Stock & Patches)** tab.
+2. Drop your PES6 PS2 ISO. The page detects the commentary files inside the disc (`e_sound.afs` for English, `s_sound.afs` for Spanish) and lets you extract them with one click.
+   *(You can also extract `E_SOUND.AFS` or `S_SOUND.AFS` manually from the root of the PS2 ISO using 7-Zip.)*
+
+### Option B — From a community PES6 commentary patch
+
+1. Unzip the patch until you have the `.afs` file (usually named `s_sound.afs` or `e_sound.afs`).
+2. Drop it onto the **Commentary (Stock & Patches)** tab of the Web Helper. In under a second it verifies that the audio clips are valid PES6 CRI ADX and tells you the exact filename to use.
+
+### Installing commentary on the Vita
+
+1. Copy the file to your Vita in lowercase:
+   - `ux0:data/pes6vita/audio/e_sound.afs` for English
+   - `ux0:data/pes6vita/audio/s_sound.afs` for Spanish
+   *(Create the `audio` folder if it does not exist.)*
+2. Start the game and make sure commentary is enabled in the in-game sound settings.
+
+If both files are present, the game in Spanish uses `s_sound.afs` and any other language uses `e_sound.afs`. To turn commentary off completely, add `PES6_COMMENTARY=0` to `ux0:data/pes6vita/env.txt`.
+
+## Folder layout on your PS Vita
+
+```text
+ux0:data/pes6vita/
+├── pes6.iso                # Your European PES6 PSP ISO (ULES00476)
+├── audio/
+│   ├── e_sound.afs         # English commentary (optional)
+│   └── s_sound.afs         # Spanish commentary (optional)
+└── stadiums/
+    ├── bernabeu.bin        # Converted stadiums (optional)
+    ├── bombonera.bin
+    ├── camp_nou.bin
+    └── ...
+```
 
 ## Controls
 
