@@ -210,7 +210,21 @@ static void setup_commentary(void) {
     if (env && !strcmp(env, "0")) { fprintf(stderr, "[commentary] off (PES6_COMMENTARY=0)\n"); return; }
     const char *order[2] = { "s_sound", "e_sound" };
     if (pes6_lang != PES6_LANG_ES) { order[0] = "e_sound"; order[1] = "s_sound"; }
-    char afs[512] = "", cat[512] = "";
+    char afs[512] = "", cat[512] = "", names_path[512] = DATA_DIR "/audio/names.afs";
+    const char *mod = getenv("PES6_MOD"), *mods = getenv("PES6_MODS");
+    if (mod && *mod && mods && *mods) {
+        for (int i = 0; i < 2 && !cat[0]; i++) {
+            snprintf(afs, sizeof afs, "%s/%s/commentary/%s.afs", mods, mod, order[i]);
+            FILE *t = fopen(afs, "rb");
+            if (!t) continue;
+            fclose(t);
+            snprintf(cat, sizeof cat, "%s/%s/commentary/%s.txt", mods, mod, order[i]);
+            FILE *ct = fopen(cat, "rb");
+            if (ct) fclose(ct);
+            else snprintf(cat, sizeof cat, "app0:catalogues/%s.txt", order[i]);
+            snprintf(names_path, sizeof names_path, "%s/%s/commentary/names.afs", mods, mod);
+        }
+    }
     for (int i = 0; i < 2 && !cat[0]; i++) {
         if (env && *env) {
             if (!strstr(env, order[i])) continue;
@@ -226,8 +240,12 @@ static void setup_commentary(void) {
     const char *gs = getenv("PES6_GOAL_SHOUT");      /* the PSP's own goal shout goes quiet (docs/39 §2.1) */
     if (!(gs && *gs == '1')) pes6_afs_goal_voice_off();
     pes6_commentary_set_enabled(pes6_settings_current.commentary);
-    FILE *n = fopen(DATA_DIR "/audio/names.afs", "rb");
-    if (n) { fclose(n); pes6_commentary_open_names(DATA_DIR "/audio/names.afs"); }
+    FILE *n = fopen(names_path, "rb");
+    if (!n && strcmp(names_path, DATA_DIR "/audio/names.afs") != 0) {
+        snprintf(names_path, sizeof names_path, DATA_DIR "/audio/names.afs");
+        n = fopen(names_path, "rb");
+    }
+    if (n) { fclose(n); pes6_commentary_open_names(names_path); }
     psp_add_vblank_task(commentary_task);
     fprintf(stderr, "[commentary] %s with %s%s\n", afs, cat, n ? ", names from names.afs" : "");
 }
@@ -269,7 +287,7 @@ static void load_env(void) {
     setenv("PES6_DISC_ISO", DATA_DIR "/pes6.iso", 1);
     setenv("PES6_IO_ROOT", DATA_DIR, 1);
     setenv("PES6_MODS", DATA_DIR "/mods", 1);
-    setenv("PES6_VERSION", "original", 1);
+    setenv("PES6_VERSION", g_cfg.patch[0] ? g_cfg.patch : "original", 1);
     setenv("PES6_MENU", "0", 1);
     setenv("PES6_GE_THREADS", "1", 1);                         /* no rasterizer workers */
     setenv("PES6_GE_ASYNC", "1", 1);                           /* the GE on core 1 (0: on the game's) */
@@ -1039,7 +1057,8 @@ int main(void) {
             fprintf(stderr, "[vita] settings saved; launching game\n");
         }
     }
-    fprintf(stderr, "[vita] config: tex=%d aa=%d post=%d res=%d fps=%d comm=%d stad=%d att=%d list=%d behind=%d\n",
+    fprintf(stderr, "[vita] config: patch=%s tex=%d aa=%d post=%d res=%d fps=%d comm=%d stad=%d att=%d list=%d behind=%d\n",
+            g_cfg.patch[0] ? g_cfg.patch : "original",
             g_cfg.tex_filter, g_cfg.antialiasing, g_cfg.post_filter, g_cfg.resolution, g_cfg.show_fps,
             g_cfg.commentary, g_cfg.stadiums, g_cfg.attendance, g_cfg.save_list, g_cfg.ge_behind);
 

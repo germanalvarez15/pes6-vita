@@ -9,6 +9,15 @@ import {
   createStoreZip,
 } from "./converter.js";
 
+import {
+  PspOptionFile,
+  buildDefaultParamBin,
+  convertFaceToPam,
+  parseFaceserverMap,
+  findPcCrestBankInFile,
+  convertPcCrestsToPspBins,
+} from "./patch_studio.js";
+
 const LANG_NAME = { S: "Spanish", E: "English", F: "French", G: "German", I: "Italian", J: "Japanese" };
 
 let pspAfs = null;
@@ -305,8 +314,536 @@ wireDropzone($("dz-comm"), $("file-comm"), async (file) => {
   );
 });
 
+// --- Tab 4: Patch Creator (Option File, Visual Editor, Faces & Crests) ---
+let studioOf = null;
+let curClubId = 0;
+let curSquadSlot = -1;
+let curPlayerId = 0;
+const studioFaces = new Map(); // playerId (number) -> { pam: Uint8Array, rgba: Uint8Array }
+let studioPcCrestBank = null;  // FlgBank from PC 0_text.afs or loose .flg
+let studioConvertedCrests = null; // { 2347: Uint8Array, 2350: Uint8Array }
+
+function slugifyId(s) {
+  const clean = (s || "")
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, 40);
+  if (!clean || clean === "original") return "custom-patch";
+  return clean;
+}
+
+$("mod-name").addEventListener("input", () => {
+  $("mod-id").value = slugifyId($("mod-name").value);
+  updateStudioSummary();
+});
+$("mod-id").addEventListener("change", () => {
+  $("mod-id").value = slugifyId($("mod-id").value);
+  updateStudioSummary();
+});
+
+function updateStudioSummary() {
+  const hasOf = !!studioOf;
+  const nFaces = studioFaces.size;
+  const hasCrests = !!studioPcCrestBank;
+  $("btn-build-patch").disabled = !hasOf && nFaces === 0 && !hasCrests;
+  $("btn-download-databin").style.display = hasOf ? "inline-block" : "none";
+  $("btn-clear-faces").style.display = nFaces > 0 ? "inline-block" : "none";
+
+  const parts = [];
+  if (hasOf) parts.push("Option File (save/ULES004760013000/DATA.BIN)");
+  if (nFaces > 0) parts.push(`${nFaces} player face(s) (faces/*.pam)`);
+  if (hasCrests) parts.push("169 PC crests & flags (afs/0_text.afs/{2347,2350}.bin)");
+  const id = slugifyId($("mod-id").value);
+  $("patch-summary-text").innerHTML = parts.length
+    ? `Ready to package <code>mods/${id}/</code> with: <strong>${parts.join(" + ")}</strong>.`
+    : "Add an Option File, player faces, or a crest bank above, then click below to download the ready-to-install PS Vita patch ZIP.";
+}
+
+function renderLeagues() {
+  if (!studioOf) return;
+  const sel = $("of-league-sel");
+  const prev = sel.value;
+  sel.innerHTML = "";
+  const leagues = studioOf.getLeagues();
+  for (const l of leagues) {
+    const opt = document.createElement("option");
+    opt.value = String(l.id);
+    opt.textContent = `[League ${l.id - 3}] ${l.name || "(Unnamed)"}`;
+    sel.appendChild(opt);
+  }
+  if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
+  const active = leagues.find((l) => String(l.id) === sel.value) || leagues[0];
+  if (active) $("of-league-name").value = active.name;
+}
+
+$("of-league-sel").addEventListener("change", () => {
+  if (!studioOf) return;
+  const leagues = studioOf.getLeagues();
+  const active = leagues.find((l) => String(l.id) === $("of-league-sel").value);
+  if (active) $("of-league-name").value = active.name;
+});
+
+$("btn-save-league").addEventListener("click", () => {
+  if (!studioOf) return;
+  const ln = parseInt($("of-league-sel").value, 10);
+  const name = $("of-league-name").value.trim();
+  if (!name) return;
+  studioOf.setLeagueName(ln, name);
+  renderLeagues();
+  setStatus($("status-of"), "ok", `✅ Updated League #${ln - 3} to <strong>${name}</strong>.`);
+});
+
+function renderClubList(filter = "") {
+  if (!studioOf) return;
+  const q = filter.trim().toLowerCase();
+  const listEl = $("of-club-list");
+  listEl.innerHTML = "";
+  const clubs = studioOf.getAllClubs();
+  for (const c of clubs) {
+    if (q && !c.name.toLowerCase().includes(q) && !c.abv.toLowerCase().includes(q) && !String(c.id).includes(q)) {
+      continue;
+    }
+    const item = document.createElement("div");
+    item.className = `club-item${c.id === curClubId ? " active" : ""}`;
+    const customBadge = c.emblemId >= 292 ? " 🛡️" : "";
+    item.innerHTML = `<span><span style="color:var(--muted); font-size:0.78rem;">#${c.id}</span> ${c.name || "(Unnamed)"}${customBadge}</span><span class="club-abv">${c.abv || "---"}</span>`;
+    item.addEventListener("click", () => {
+      curClubId = c.id;
+      curSquadSlot = -1;
+      $("of-player-box").style.display = "none";
+      renderClubList($("of-club-search").value);
+      renderSelectedClub();
+    });
+    listEl.appendChild(item);
+  }
+}
+
+function renderSelectedClub() {
+  if (!studioOf) return;
+  const club = studioOf.getClub(curClubId);
+  $("of-club-name").value = club.name;
+  $("of-club-abv").value = club.abv;
+  $("status-club-edit").className = "status";
+
+  const tbody = $("of-squad-tbody");
+  tbody.innerHTML = "";
+  const squad = studioOf.getSquad(curClubId);
+  for (const p of squad) {
+    const tr = document.createElement("tr");
+    if (p.slot === curSquadSlot) tr.classList.add("active");
+    const hasFace = studioFaces.has(p.id);
+    tr.innerHTML =
+      `<td><strong>${p.number}</strong></td>` +
+      `<td style="color:var(--muted)">${p.id || "-"}</td>` +
+      `<td>${p.name}</td>` +
+      `<td style="font-family:monospace">${p.shirt}</td>` +
+      `<td><span class="club-abv">${p.pos}</span></td>` +
+      `<td>${p.id ? p.age : "-"}</td>` +
+      `<td>${p.id ? `${p.attack} / ${p.defence} / ${p.top_speed}` : "-"}</td>` +
+      `<td>${hasFace ? "✅ Face" : "-"}</td>`;
+    tr.addEventListener("click", () => {
+      if (!p.id) return;
+      curSquadSlot = p.slot;
+      curPlayerId = p.id;
+      renderSelectedClub();
+      openPlayerEditor(p);
+    });
+    tbody.appendChild(tr);
+  }
+}
+
+function openPlayerEditor(p) {
+  $("of-player-box").style.display = "block";
+  $("of-player-title").textContent = `Edit Player #${p.id} — ${p.name} (${p.pos}, Slot ${p.slot + 1})`;
+  $("of-p-name").value = p.name;
+  $("of-p-shirt").value = p.shirt;
+  $("of-p-num").value = p.number;
+  $("of-p-age").value = p.age;
+  $("of-p-height").value = p.height;
+  $("of-p-atk").value = p.attack;
+  $("of-p-def").value = p.defence;
+  $("of-p-spd").value = p.top_speed;
+}
+
+$("of-club-search").addEventListener("input", (e) => renderClubList(e.target.value));
+
+$("btn-save-club").addEventListener("click", () => {
+  if (!studioOf) return;
+  const name = $("of-club-name").value.trim();
+  const abv = $("of-club-abv").value.trim().toUpperCase();
+  if (!name) return;
+  studioOf.setClub(curClubId, name, abv);
+  renderClubList($("of-club-search").value);
+  setStatus($("status-club-edit"), "ok", `✅ Saved club #${curClubId}: <strong>${name} (${abv})</strong>.`);
+});
+
+$("file-club-crest").addEventListener("change", async (e) => {
+  if (!studioOf || !e.target.files || !e.target.files[0]) return;
+  try {
+    const file = e.target.files[0];
+    const eid = await studioOf.setClubCustomEmblemFromImage(curClubId, file);
+    renderClubList($("of-club-search").value);
+    setStatus(
+      $("status-club-edit"),
+      "ok",
+      `✅ Embedded custom 64×64 128-color crest into Option File (Emblem ID ${eid}, transparent backdrop cleaned).`
+    );
+  } catch (err) {
+    setStatus($("status-club-edit"), "err", `❌ ${err.message || err}`);
+  } finally {
+    e.target.value = "";
+  }
+});
+
+$("btn-save-player").addEventListener("click", () => {
+  if (!studioOf || !curPlayerId) return;
+  const name = $("of-p-name").value.trim();
+  const shirt = $("of-p-shirt").value.trim();
+  const num = parseInt($("of-p-num").value, 10) || 1;
+  const age = parseInt($("of-p-age").value, 10) || 25;
+  const height = parseInt($("of-p-height").value, 10) || 180;
+  const attack = parseInt($("of-p-atk").value, 10) || 70;
+  const defence = parseInt($("of-p-def").value, 10) || 70;
+  const top_speed = parseInt($("of-p-spd").value, 10) || 70;
+
+  studioOf.setPlayer(curPlayerId, { name, shirt, age, height, attack, defence, top_speed });
+  if (curSquadSlot >= 0) studioOf.setSquadSlot(curClubId, curSquadSlot, curPlayerId, num);
+  renderSelectedClub();
+  setStatus($("status-club-edit"), "ok", `✅ Updated player #${curPlayerId} (<strong>${name}</strong>, #${num}).`);
+});
+
+$("file-player-face").addEventListener("change", async (e) => {
+  if (!curPlayerId || !e.target.files || !e.target.files[0]) return;
+  try {
+    const res = await convertFaceToPam(e.target.files[0]);
+    studioFaces.set(curPlayerId, res);
+    renderFaceGallery();
+    renderSelectedClub();
+    updateStudioSummary();
+    setStatus($("status-club-edit"), "ok", `✅ Converted &amp; linked 32×64 face for player #${curPlayerId} (<code>faces/${curPlayerId}.pam</code>).`);
+  } catch (err) {
+    setStatus($("status-club-edit"), "err", `❌ ${err.message || err}`);
+  } finally {
+    e.target.value = "";
+  }
+});
+
+wireDropzone($("dz-of"), $("file-of"), async (file) => {
+  try {
+    studioOf = await PspOptionFile.fromFile(file);
+    curClubId = 0;
+    curSquadSlot = -1;
+    $("of-editor").style.display = "block";
+    $("of-player-box").style.display = "none";
+    renderLeagues();
+    renderClubList();
+    renderSelectedClub();
+    updateStudioSummary();
+    const kindLabel =
+      studioOf.sourceKind === "pc_encrypted"
+        ? "Encrypted PES6 PC Option File (decrypted &amp; converted to PSP layout)"
+        : studioOf.sourceKind === "pc_plain"
+        ? "Decrypted PES6 PC Option File (converted to PSP layout)"
+        : "Unencrypted PES6 PSP System Save (DATA.BIN)";
+    setStatus(
+      $("status-of"),
+      "ok",
+      `✅ Loaded <strong>${file.name}</strong> — ${kindLabel}. Use the editor below to customize leagues, clubs, emblems, or squads.`
+    );
+  } catch (err) {
+    studioOf = null;
+    $("of-editor").style.display = "none";
+    updateStudioSummary();
+    setStatus(
+      $("status-of"),
+      "err",
+      `❌ Not a valid PES6 PC Option File (KONAMI-WIN32PES6OPT) or PSP DATA.BIN (${err.message || err}). Must be 1,191,936 bytes.`
+    );
+  }
+});
+
+// --- Faces Batch & Individual ---
+function renderFaceGallery() {
+  const gal = $("face-gallery");
+  gal.innerHTML = "";
+  if (studioFaces.size === 0) {
+    gal.style.display = "none";
+    return;
+  }
+  gal.style.display = "flex";
+  const sortedIds = [...studioFaces.keys()].sort((a, b) => a - b);
+  for (const pid of sortedIds.slice(0, 120)) {
+    const { rgba } = studioFaces.get(pid);
+    const chip = document.createElement("div");
+    chip.className = "face-chip";
+    const cv = document.createElement("canvas");
+    cv.width = 32;
+    cv.height = 64;
+    cv.getContext("2d").putImageData(new ImageData(new Uint8ClampedArray(rgba), 32, 64), 0, 0);
+    const pName = studioOf ? studioOf.getPlayer(pid).name : "";
+    const txt = document.createElement("span");
+    txt.textContent = pName ? `#${pid} ${pName}` : `#${pid}`;
+    chip.append(cv, txt);
+    gal.appendChild(chip);
+  }
+  if (sortedIds.length > 120) {
+    const more = document.createElement("div");
+    more.className = "face-chip";
+    more.textContent = `+${sortedIds.length - 120} more faces...`;
+    gal.appendChild(more);
+  }
+}
+
+async function handleBatchFaces(fileList) {
+  const files = [...fileList];
+  if (files.length === 0) return;
+  $("prog-faces").classList.add("show");
+  $("prog-faces-fill").style.width = "0%";
+  $("prog-faces-text").textContent = "Scanning face files...";
+
+  // Check if map.txt is present
+  let mapFile = files.find((f) => f.name.toLowerCase() === "map.txt");
+  const byRelPath = new Map();
+  for (const f of files) {
+    const rel = (f.webkitRelativePath || f.name).replace(/\\/g, "/");
+    byRelPath.set(rel.toLowerCase(), f);
+    byRelPath.set(f.name.toLowerCase(), f);
+    // Also index relative to "/faces/" if selected from a parent folder
+    const fi = rel.toLowerCase().indexOf("/faces/");
+    if (fi >= 0) byRelPath.set(rel.slice(fi + 7).toLowerCase(), f);
+  }
+
+  const tasks = []; // [{ id, file }]
+  if (mapFile) {
+    const mapText = await mapFile.text();
+    const idMap = parseFaceserverMap(mapText);
+    for (const [id, rel] of idMap.entries()) {
+      const lowerRel = rel.toLowerCase();
+      const pngRel = lowerRel.replace(/\.bin$/, ".png");
+      const basePng = pngRel.split("/").pop();
+      const baseBin = lowerRel.split("/").pop();
+      const chosen =
+        byRelPath.get(pngRel) ||
+        byRelPath.get(lowerRel) ||
+        byRelPath.get(basePng) ||
+        byRelPath.get(baseBin);
+      if (chosen) tasks.push({ id, file: chosen });
+    }
+  }
+
+  // Also check loose files named directly by player ID (e.g. 1340.png or 1340.bin)
+  const seenIds = new Set(tasks.map((t) => t.id));
+  for (const f of files) {
+    const m = f.name.match(/^(\d+)\.(png|jpg|jpeg|webp|bin)$/i);
+    if (m) {
+      const id = parseInt(m[1], 10);
+      if (!seenIds.has(id) || !f.name.toLowerCase().endsWith(".bin")) {
+        seenIds.add(id);
+        tasks.push({ id, file: f });
+      }
+    }
+  }
+
+  if (tasks.length === 0) {
+    $("prog-faces").classList.remove("show");
+    setStatus(
+      $("status-faces"),
+      "err",
+      "❌ No matching player faces found. Select a folder containing <code>map.txt</code> + face files, or files named <code>&lt;player_id&gt;.png</code> / <code>.bin</code>."
+    );
+    return;
+  }
+
+  let okCount = 0;
+  for (let i = 0; i < tasks.length; i++) {
+    const { id, file } = tasks[i];
+    if (i % 8 === 0) {
+      $("prog-faces-fill").style.width = `${Math.round((i / tasks.length) * 100)}%`;
+      $("prog-faces-text").textContent = `Warping face ${i + 1} / ${tasks.length} (Player #${id})...`;
+      await new Promise((r) => setTimeout(r, 0));
+    }
+    try {
+      const res = await convertFaceToPam(file);
+      studioFaces.set(id, res);
+      okCount++;
+    } catch (_) {
+      // skip unreadable face file
+    }
+  }
+  $("prog-faces-fill").style.width = "100%";
+  $("prog-faces-text").textContent = `Converted ${okCount} face(s).`;
+  renderFaceGallery();
+  if (studioOf) renderSelectedClub();
+  updateStudioSummary();
+  setStatus(
+    $("status-faces"),
+    "ok",
+    `✅ <strong>${studioFaces.size} player face(s) ready!</strong> (${okCount} newly converted to 32×64 PAM + <code>faces/index.txt</code>).`
+  );
+}
+
+$("file-faces-dir").addEventListener("change", (e) => {
+  if (e.target.files) handleBatchFaces(e.target.files);
+  e.target.value = "";
+});
+$("file-faces-multi").addEventListener("change", (e) => {
+  if (e.target.files) handleBatchFaces(e.target.files);
+  e.target.value = "";
+});
+$("file-face-by-id").addEventListener("change", async (e) => {
+  if (!e.target.files || !e.target.files[0]) return;
+  const pid = parseInt($("single-face-id").value, 10);
+  if (!pid || pid < 1 || pid >= 32768) {
+    setStatus($("status-faces"), "err", "❌ Enter a valid Player Database ID first (1 – 32767).");
+    e.target.value = "";
+    return;
+  }
+  try {
+    const res = await convertFaceToPam(e.target.files[0]);
+    studioFaces.set(pid, res);
+    renderFaceGallery();
+    if (studioOf) renderSelectedClub();
+    updateStudioSummary();
+    setStatus($("status-faces"), "ok", `✅ Added face for Player #${pid} (<code>faces/${pid}.pam</code>). Total faces: ${studioFaces.size}.`);
+  } catch (err) {
+    setStatus($("status-faces"), "err", `❌ ${err.message || err}`);
+  } finally {
+    e.target.value = "";
+  }
+});
+
+$("btn-clear-faces").addEventListener("click", () => {
+  studioFaces.clear();
+  renderFaceGallery();
+  if (studioOf) renderSelectedClub();
+  updateStudioSummary();
+  $("status-faces").className = "status";
+});
+
+// --- Full PC Crest Bank (0_text.afs / .flg) ---
+wireDropzone($("dz-crests"), $("file-crests"), async (file) => {
+  studioPcCrestBank = null;
+  studioConvertedCrests = null;
+  try {
+    const bank = await findPcCrestBankInFile(file);
+    studioPcCrestBank = bank;
+    updateStudioSummary();
+    setStatus(
+      $("status-crests"),
+      "ok",
+      `✅ Found 64×64 PC Crest Bank (${bank.groups[1].ents.length} crests, ${bank.groups[0].ents.length} flags) in <strong>${file.name}</strong>.` +
+        (pspAfs
+          ? " Ready to build PSP slots <code>2347.bin</code> (32×32) and <code>2350.bin</code> (64×64)!"
+          : "<br>⚠️ <em>Load your PSP <code>pes6.iso</code> in Tab 1 before clicking Build Patch so the PSP flag/crest banks can be merged.</em>")
+    );
+  } catch (err) {
+    updateStudioSummary();
+    setStatus($("status-crests"), "err", `❌ ${err.message || err}`);
+  }
+});
+
+// --- Build & Download Patch ZIP ---
+$("btn-download-databin").addEventListener("click", () => {
+  if (!studioOf) return;
+  triggerDownload(new Blob([studioOf.d], { type: "application/octet-stream" }), "DATA.BIN");
+});
+
+$("btn-build-patch").addEventListener("click", async () => {
+  const btn = $("btn-build-patch");
+  btn.disabled = true;
+  try {
+    const id = slugifyId($("mod-id").value);
+    const name = ($("mod-name").value || id).trim();
+    const authorVer = ($("mod-author").value || "").split("·").map((s) => s.trim());
+    const author = authorVer[0] || "Community";
+    const version = authorVer[1] || "1.0";
+
+    const entries = [];
+    const replaces = [];
+    const te = new TextEncoder();
+
+    if (studioOf) {
+      replaces.push("save");
+      entries.push({
+        name: `${id}/save/ULES004760013000/DATA.BIN`,
+        data: studioOf.d,
+      });
+      entries.push({
+        name: `${id}/save/ULES004760013000/PARAM.BIN`,
+        data: buildDefaultParamBin(name),
+      });
+    }
+
+    if (studioFaces.size > 0) {
+      replaces.push("faces");
+      const sortedIds = [...studioFaces.keys()].sort((a, b) => a - b);
+      for (const pid of sortedIds) {
+        entries.push({
+          name: `${id}/faces/${pid}.pam`,
+          data: studioFaces.get(pid).pam,
+        });
+      }
+      const indexTxt = sortedIds.map((i) => `${i}\n`).join("");
+      entries.push({
+        name: `${id}/faces/index.txt`,
+        data: te.encode(indexTxt),
+      });
+    }
+
+    if (studioPcCrestBank) {
+      if (!pspAfs) {
+        throw new Error("Please load your PSP pes6.iso in Tab 1 first so the PC crest bank can be merged with the PSP flag banks (slots 2347 & 2350).");
+      }
+      setStatus($("status-build-patch"), "info", "⏳ Converting 169 PC crests &amp; requantizing PSP flag banks (slots 2347 &amp; 2350)...");
+      await new Promise((r) => setTimeout(r, 10));
+      studioConvertedCrests = await convertPcCrestsToPspBins(studioPcCrestBank, pspAfs);
+      replaces.push("afs");
+      entries.push({
+        name: `${id}/afs/0_text.afs/2347.bin`,
+        data: studioConvertedCrests[2347],
+      });
+      entries.push({
+        name: `${id}/afs/0_text.afs/2350.bin`,
+        data: studioConvertedCrests[2350],
+      });
+    }
+
+    const modJson = {
+      format: 1,
+      id,
+      name,
+      author,
+      version,
+      description: `Built with PES6 Vita Web Patch Creator (${replaces.join(", ")})`,
+      base: "ULES00476",
+      replaces,
+      commentary: "base",
+    };
+    entries.unshift({
+      name: `${id}/mod.json`,
+      data: te.encode(JSON.stringify(modJson, null, 2) + "\n"),
+    });
+
+    const zipBlob = createStoreZip(entries);
+    triggerDownload(zipBlob, `${id}.zip`);
+    setStatus(
+      $("status-build-patch"),
+      "ok",
+      `✅ <strong>Patch <code>${id}.zip</code> downloaded!</strong><br>` +
+        `1. Extract <code>${id}/</code> into <code>ux0:data/pes6vita/mods/${id}/</code> on your PS Vita.<br>` +
+        `2. On the PS Vita LiveArea screen, tap <strong>SETTINGS</strong> and select <strong>${name}</strong> under <em>Game Patch / Mod</em>.`
+    );
+  } catch (err) {
+    setStatus($("status-build-patch"), "err", `❌ ${err.message || err}`);
+  } finally {
+    btn.disabled = false;
+  }
+});
+
 // Init
 renderStadiumGrid();
 populatePatchSelects();
 updateSelCount();
 updatePatchPspBanner();
+updateStudioSummary();

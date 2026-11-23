@@ -211,6 +211,10 @@ export class PspIsoAfs {
     }
     return data;
   }
+
+  async readBytes(relOff, size) {
+    return readSlice(this.file, this.afsBase + relOff, size);
+  }
 }
 
 // --- PS2 0_TEXT.AFS reader (standard "AFS\0" format, inside a PS2 ISO or loose file) ---

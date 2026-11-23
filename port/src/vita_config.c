@@ -2,6 +2,8 @@
  * Localized to the PS Vita system language (EN, ES, FR, DE, IT, PT; English fallback). */
 #include "vita_config.h"
 #include "screen.h"
+#include "patch.h"
+#include "version.h"
 
 #include <psp2/ctrl.h>
 #include <psp2/display.h>
@@ -19,6 +21,7 @@ static int clampi(int v, int lo, int hi) { return v < lo ? lo : v > hi ? hi : v;
 
 void vita_config_defaults(vita_config *cfg) {
     memset(cfg, 0, sizeof *cfg);
+    snprintf(cfg->patch, sizeof cfg->patch, "original");
     cfg->tex_filter   = 1;   /* Bilinear (3D): smooth pitch/kits/stadium, crisp 2D UI, zero CPU cost */
     cfg->antialiasing = 0;   /* Off by default; FXAA 1 toggle away */
     cfg->post_filter  = 0;   /* None */
@@ -43,6 +46,10 @@ void vita_config_load(vita_config *cfg, const char *data_dir) {
         char *eq = strchr(line, '=');
         if (!eq || line[0] == '#') continue;
         *eq = 0;
+        if (!strcmp(line, "patch") && eq[1]) {
+            snprintf(cfg->patch, sizeof cfg->patch, "%s", eq + 1);
+            continue;
+        }
         const int v = atoi(eq + 1);
         if (!strcmp(line, "tex_filter"))        cfg->tex_filter   = clampi(v, 0, 2);
         else if (!strcmp(line, "antialiasing")) cfg->antialiasing = clampi(v, 0, 1);
@@ -65,6 +72,7 @@ int vita_config_save(const vita_config *cfg, const char *data_dir) {
     if (!f) return -1;
     fprintf(f,
             "# PES6 Vita settings (configured from LiveArea)\n"
+            "patch=%s\n"
             "tex_filter=%d\n"
             "antialiasing=%d\n"
             "post_filter=%d\n"
@@ -75,6 +83,7 @@ int vita_config_save(const vita_config *cfg, const char *data_dir) {
             "attendance=%d\n"
             "save_list=%d\n"
             "ge_behind=%d\n",
+            cfg->patch[0] ? cfg->patch : "original",
             cfg->tex_filter, cfg->antialiasing, cfg->post_filter, cfg->resolution,
             cfg->show_fps, cfg->commentary, cfg->stadiums, cfg->attendance,
             cfg->save_list, cfg->ge_behind);
@@ -98,6 +107,7 @@ static int map_sys_lang(int sys_lang) {
 }
 
 enum {
+    ITEM_PATCH,
     ITEM_TEX_FILTER,
     ITEM_AA,
     ITEM_POST_FILTER,
@@ -112,6 +122,20 @@ enum {
     ITEM_EXIT,
     ITEM_COUNT
 };
+
+static pes6_version g_versions[PES6_PATCH_MAX + 1];
+static int g_nversions = 1;
+
+static void refresh_versions(const char *data_dir) {
+    char mods[512];
+    snprintf(mods, sizeof mods, "%s/mods", data_dir);
+    g_nversions = pes6_versions_list(mods, g_versions, PES6_PATCH_MAX + 1);
+    if (g_nversions < 1) {
+        snprintf(g_versions[0].id, sizeof g_versions[0].id, "original");
+        snprintf(g_versions[0].title, sizeof g_versions[0].title, "Original");
+        g_nversions = 1;
+    }
+}
 
 typedef struct {
     const char *title;
@@ -139,12 +163,14 @@ static const cfg_strings STR[LANG_COUNT] = {
         .post = { "None", "Sharpen", "Vivid", "CRT Scanlines" },
         .att  = { "No", "Low", "Normal", "High" },
         .label = {
+            "Game Patch / Mod",
             "Texture Filtering", "Anti-Aliasing", "Visual Filter", "Internal Resolution",
             "Show FPS Counter", "Match Commentary", "Custom Stadiums", "Default Attendance",
             "PSP Save List Dialog", "Async GE Frame-Behind",
             "Save & Launch Game", "Save & Return to LiveArea",
         },
         .desc = {
+            "Select active patch from ux0:data/pes6vita/mods/ (teams, squads, faces, crests).",
             "Bilinear 3D smooths pitch & kits while keeping 2D menus sharp.",
             "FXAA smooths jagged edges on players, pitch lines and goalposts.",
             "Post-processing: Sharpen pairs with FXAA; Vivid boosts colors.",
@@ -169,12 +195,14 @@ static const cfg_strings STR[LANG_COUNT] = {
         .post = { "Ninguno", "Nitidez (Sharpen)", "Vivido", "Scanlines CRT" },
         .att  = { "Sin publico", "Bajo", "Normal", "Alto" },
         .label = {
+            "Parche / Version",
             "Filtrado de texturas", "Anti-Aliasing", "Filtro visual", "Resolucion interna",
             "Mostrar contador FPS", "Relatos / Comentarios", "Estadios personalizados", "Publico por defecto",
             "Lista de partidas guardadas", "GE asincrono (Frame-Behind)",
             "Guardar e iniciar juego", "Guardar y volver al LiveArea",
         },
         .desc = {
+            "Elige el parche activo en ux0:data/pes6vita/mods/ (equipos, plantillas, caras).",
             "Bilinear 3D suaviza cesped y kits dejando los menus 2D nitidos.",
             "FXAA suaviza bordes dentados de jugadores, lineas y arcos.",
             "Post-procesado: Nitidez combina con FXAA; Vivido realza colores.",
@@ -199,12 +227,14 @@ static const cfg_strings STR[LANG_COUNT] = {
         .post = { "Aucun", "Nettete (Sharpen)", "Vif", "Scanlines CRT" },
         .att  = { "Aucun", "Faible", "Normal", "Eleve" },
         .label = {
+            "Patch / Version du jeu",
             "Filtrage des textures", "Anticrenelage (AA)", "Filtre visuel", "Resolution interne",
             "Afficher le compteur FPS", "Commentaires du match", "Stades personnalises", "Affluence par defaut",
             "Liste des sauvegardes PSP", "GE asynchrone (Frame-Behind)",
             "Sauvegarder et lancer", "Sauvegarder et quitter",
         },
         .desc = {
+            "Choisit le patch actif dans ux0:data/pes6vita/mods/ (equipes, visages, emblemes).",
             "Bilineaire 3D lisse terrain et maillots, garde les menus 2D nets.",
             "FXAA lisse les bords creneles des joueurs, lignes et buts.",
             "Post-traitement: Nettete avec FXAA; Vif renforce les couleurs.",
@@ -229,12 +259,14 @@ static const cfg_strings STR[LANG_COUNT] = {
         .post = { "Keiner", "Scharfen", "Lebendig", "CRT-Scanlines" },
         .att  = { "Keine", "Niedrig", "Normal", "Hoch" },
         .label = {
+            "Spiel-Patch / Version",
             "Texturfilterung", "Anti-Aliasing", "Bildfilter", "Interne Auflosung",
             "FPS-Anzeige", "Spielkommentar", "Eigene Stadien", "Standard-Zuschauer",
             "PSP-Speicherliste", "Asynchrones GE (Frame-Behind)",
             "Speichern & Spiel starten", "Speichern & zum LiveArea",
         },
         .desc = {
+            "Wahlt den aktiven Patch aus ux0:data/pes6vita/mods/ (Teams, Kader, Gesichter).",
             "Bilinear 3D glattet Rasen & Trikots, 2D-Menus bleiben scharf.",
             "FXAA glattet Treppeneffekte bei Spielern, Linien und Toren.",
             "Nachbearbeitung: Scharfen mit FXAA; Lebendig betont Farben.",
@@ -259,12 +291,14 @@ static const cfg_strings STR[LANG_COUNT] = {
         .post = { "Nessuno", "Nitidezza", "Vivido", "Scanlines CRT" },
         .att  = { "Nessuno", "Basso", "Normale", "Alto" },
         .label = {
+            "Patch / Versione gioco",
             "Filtro texture", "Anti-Aliasing", "Filtro visivo", "Risoluzione interna",
             "Mostra contatore FPS", "Telecronaca", "Stadi personalizzati", "Pubblico predefinito",
             "Lista salvataggi PSP", "GE asincrono (Frame-Behind)",
             "Salva e avvia il gioco", "Salva e torna al LiveArea",
         },
         .desc = {
+            "Scegli la patch attiva in ux0:data/pes6vita/mods/ (squadre, rose, volti, stemmi).",
             "Bilineare 3D ammorbidisce campo e divise, menu 2D nitidi.",
             "FXAA riduce le scalettature su giocatori, linee e porte.",
             "Post-processing: Nitidezza con FXAA; Vivido esalta i colori.",
@@ -289,12 +323,14 @@ static const cfg_strings STR[LANG_COUNT] = {
         .post = { "Nenhum", "Nitidez (Sharpen)", "Vivido", "Scanlines CRT" },
         .att  = { "Vazio", "Baixo", "Normal", "Alto" },
         .label = {
+            "Patch / Versao do jogo",
             "Filtro de texturas", "Anti-Aliasing", "Filtro visual", "Resolucao interna",
             "Mostrar contador FPS", "Narracao / Comentarios", "Estadios personalizados", "Publico padrao",
             "Lista de saves PSP", "GE assincrono (Frame-Behind)",
             "Salvar e iniciar jogo", "Salvar e voltar ao LiveArea",
         },
         .desc = {
+            "Escolhe o patch ativo em ux0:data/pes6vita/mods/ (times, elencos, faces, escudos).",
             "Bilinear 3D suaviza gramado e kits mantendo menus 2D nitidos.",
             "FXAA suaviza serrilhados em jogadores, linhas e traves.",
             "Pos-processamento: Nitidez com FXAA; Vivido realca cores.",
@@ -314,8 +350,15 @@ static const cfg_strings STR[LANG_COUNT] = {
 static const char *item_value(const vita_config *c, int idx, const cfg_strings *s) {
     static const char *const AA_TXT[2] = { "Off", "FXAA" };
     static const char *const RES_TXT[2] = { "960x544 (2x)", "480x272 (1x)" };
+    static char patch_title[40];
 
     switch (idx) {
+    case ITEM_PATCH: {
+        int vi = pes6_version_find(g_versions, g_nversions, c->patch);
+        if (vi < 0) vi = 0;
+        snprintf(patch_title, sizeof patch_title, "%.36s", g_versions[vi].title);
+        return patch_title;
+    }
     case ITEM_TEX_FILTER:  return s->tex[c->tex_filter];
     case ITEM_AA:          return AA_TXT[c->antialiasing];
     case ITEM_POST_FILTER: return s->post[c->post_filter];
@@ -332,6 +375,13 @@ static const char *item_value(const vita_config *c, int idx, const cfg_strings *
 
 static void item_step(vita_config *c, int idx, int delta) {
     switch (idx) {
+    case ITEM_PATCH: {
+        int vi = pes6_version_find(g_versions, g_nversions, c->patch);
+        if (vi < 0) vi = 0;
+        vi = (vi + g_nversions + delta) % g_nversions;
+        snprintf(c->patch, sizeof c->patch, "%s", g_versions[vi].id);
+        break;
+    }
     case ITEM_TEX_FILTER:  c->tex_filter   = (c->tex_filter + 3 + delta) % 3; break;
     case ITEM_AA:          c->antialiasing = (c->antialiasing + 2 + delta) % 2; break;
     case ITEM_POST_FILTER: c->post_filter  = (c->post_filter + 4 + delta) % 4; break;
@@ -360,12 +410,12 @@ static void draw_menu(const vita_config *cfg, int sel, const cfg_strings *s, con
     screen_text_at(px, SW, SH, SW - 32 - screen_text_letters(sub) * 12, 22, 2, sub,
                    toast && toast[0] ? RGB(130, 240, 140) : RGB(160, 175, 205));
 
-    /* Main panel with 12 compact rows */
+    /* Main panel with 13 compact rows */
     const int panel_x = 32, panel_w = SW - 64;
-    const int row_y0 = 66, row_h = 31;
+    const int row_y0 = 64, row_h = 29;
 
     for (int i = 0; i < ITEM_COUNT; i++) {
-        const int y = row_y0 + i * row_h + (i >= ITEM_PLAY ? 8 : 0);
+        const int y = row_y0 + i * row_h + (i >= ITEM_PLAY ? 6 : 0);
         const int is_action = i >= ITEM_PLAY;
         const int active = i == sel;
 
@@ -382,18 +432,18 @@ static void draw_menu(const vita_config *cfg, int sel, const cfg_strings *s, con
         const uint32_t lcol = is_action
             ? (active ? RGB(160, 255, 180) : RGB(190, 225, 200))
             : (active ? RGB(255, 245, 200) : RGB(225, 230, 240));
-        screen_text_at(px, SW, SH, panel_x + 16, y + 7, 2, s->label[i], lcol);
+        screen_text_at(px, SW, SH, panel_x + 16, y + 6, 2, s->label[i], lcol);
 
         if (!is_action) {
             char val[64];
             snprintf(val, sizeof val, active ? "< %s >" : "%s", item_value(cfg, i, s));
             const int vw = screen_text_letters(val) * 12;
             const uint32_t vcol = active ? RGB(255, 215, 0) : RGB(130, 205, 255);
-            screen_text_at(px, SW, SH, panel_x + panel_w - 16 - vw, y + 7, 2, val, vcol);
+            screen_text_at(px, SW, SH, panel_x + panel_w - 16 - vw, y + 6, 2, val, vcol);
         } else {
             const char *tag = i == ITEM_PLAY ? "[START / X]" : "[O / X]";
             const int tw = screen_text_letters(tag) * 12;
-            screen_text_at(px, SW, SH, panel_x + panel_w - 16 - tw, y + 7, 2, tag,
+            screen_text_at(px, SW, SH, panel_x + panel_w - 16 - tw, y + 6, 2, tag,
                            active ? RGB(255, 215, 0) : RGB(130, 145, 175));
         }
     }
@@ -410,6 +460,9 @@ static void draw_menu(const vita_config *cfg, int sel, const cfg_strings *s, con
 }
 
 int vita_config_menu(vita_config *cfg, const char *data_dir, int sys_lang) {
+    refresh_versions(data_dir);
+    if (pes6_version_find(g_versions, g_nversions, cfg->patch) < 0)
+        snprintf(cfg->patch, sizeof cfg->patch, "%s", g_versions[0].id);
     const cfg_strings *s = &STR[map_sys_lang(sys_lang)];
     int sel = 0;
     uint32_t prev = 0xFFFFFFFFu;   /* ignore buttons still held from LiveArea tap */

@@ -4,6 +4,7 @@
 #define PES6_VITA_CONFIG_H
 
 typedef struct {
+    char patch[64];     /* active patch id in ux0:data/pes6vita/mods/<id>, or "original" */
     int tex_filter;     /* 0: Nearest (Sharp), 1: Bilinear (3D), 2: Bilinear (All) */
     int antialiasing;   /* 0: Off, 1: FXAA */
     int post_filter;    /* 0: None, 1: Sharpen, 2: Vivid, 3: CRT Scanlines */

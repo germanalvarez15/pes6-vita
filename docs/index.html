@@ -3,15 +3,15 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>PES6 PS Vita — Stadiums &amp; Commentary Helper</title>
+  <title>PES6 PS Vita — Patch Creator, Stadiums &amp; Commentary Helper</title>
   <link rel="stylesheet" href="style.css">
 </head>
 <body>
   <div class="wrap">
     <header>
       <div>
-        <h1>PES6 PS Vita — Stadiums &amp; Commentary Helper</h1>
-        <p class="subtitle">Convert stadiums and verify commentary banks directly in your browser — no installation required.</p>
+        <h1>PES6 PS Vita — Patch Creator, Stadiums &amp; Commentary Helper</h1>
+        <p class="subtitle">Build full patches (teams, squads, player faces &amp; crests), convert PS2 stadiums, and verify commentary banks 100% locally in your browser.</p>
       </div>
     </header>
 
@@ -21,8 +21,9 @@
 
     <nav class="tabs">
       <button class="tab-btn active" data-tab="official">🏟️ 38 Official Stadiums</button>
-      <button class="tab-btn" data-tab="patch">🧩 Import Stadium (PS2 Patch)</button>
-      <button class="tab-btn" data-tab="commentary">🎙️ Commentary (Stock &amp; Patches)</button>
+      <button class="tab-btn" data-tab="patch">🧩 Import Stadium (PS2)</button>
+      <button class="tab-btn" data-tab="commentary">🎙️ Commentary</button>
+      <button class="tab-btn" data-tab="studio">⚽ Patch Creator (Teams &amp; Faces)</button>
     </nav>
 
     <!-- TAB 1: OFFICIAL 38 STADIUMS FROM PSP ISO -->
@@ -131,6 +132,211 @@
       </div>
     </section>
 
+    <!-- TAB 4: PATCH CREATOR (TEAMS, SQUADS, FACES & CRESTS) -->
+    <section id="tab-studio" class="panel">
+      <!-- 1. Patch Metadata -->
+      <div class="card">
+        <h2><span class="step-badge">STEP 1</span> Patch Info (<code>mod.json</code>)</h2>
+        <p class="hint">Create a custom patch for PS Vita. Once copied to <code>ux0:data/pes6vita/mods/&lt;id&gt;/</code>, you can select it from the <strong>SETTINGS</strong> button on the game's LiveArea screen (each patch keeps its own separate saves).</p>
+        <div class="form-grid-3">
+          <div class="field">
+            <label for="mod-name">Patch Name (shown in LiveArea Settings):</label>
+            <input type="text" id="mod-name" class="text-input" value="My PES6 Patch" placeholder="Season 2026 Patch">
+          </div>
+          <div class="field">
+            <label for="mod-id">Folder ID (lowercase, no spaces):</label>
+            <input type="text" id="mod-id" class="text-input" value="my-pes6-patch" placeholder="season-2026">
+          </div>
+          <div class="field">
+            <label for="mod-author">Author &amp; Version:</label>
+            <input type="text" id="mod-author" class="text-input" value="Community · v1.0" placeholder="Author · v1.0">
+          </div>
+        </div>
+      </div>
+
+      <!-- 2. Option File + Visual Editor -->
+      <div class="card">
+        <h2><span class="step-badge">STEP 2</span> Teams, Squads &amp; Players (Option File + Visual Editor)</h2>
+        <p class="hint">Upload a <strong>PES6 PC Option File</strong> (<code>KONAMI-WIN32PES6OPT</code>, automatically decrypted and converted to PSP layout) or a <strong>PSP <code>DATA.BIN</code></strong>. You can then inspect and edit leagues, clubs, custom PNG emblems, squads, and player stats directly below.</p>
+
+        <div class="compat-note">
+          <span class="pill pill-ok">✅ Supported: PES6 PC Option File (KONAMI-WIN32PES6OPT) &amp; PSP DATA.BIN (1,191,936 bytes)</span>
+        </div>
+
+        <label class="dropzone" id="dz-of">
+          <input type="file" id="file-of" accept=".bin,*">
+          <div class="dz-title">Drop your KONAMI-WIN32PES6OPT (PC) or DATA.BIN (PSP) here</div>
+          <div class="dz-sub">Automatically decrypts PC Option Files and aligns blocks 3–8 &amp; leagues for PS Vita</div>
+        </label>
+        <div id="status-of" class="status"></div>
+
+        <!-- Visual Editor (shown once an Option File is loaded) -->
+        <div id="of-editor" style="display:none; margin-top:18px;">
+          <!-- Leagues -->
+          <div style="border-top:1px solid var(--border); padding-top:14px; margin-bottom:14px;">
+            <h3 style="margin:0 0 8px; font-size:1rem;">🏆 Edit League Names</h3>
+            <div class="toolbar">
+              <select id="of-league-sel" class="select-input" style="max-width:260px;"></select>
+              <input type="text" id="of-league-name" class="text-input" style="flex:1; min-width:180px;" maxlength="20" placeholder="League name (up to 20 chars)">
+              <button class="btn" id="btn-save-league">Apply League Name</button>
+            </div>
+          </div>
+
+          <!-- Clubs, Emblems & Squads -->
+          <div style="border-top:1px solid var(--border); padding-top:14px;">
+            <h3 style="margin:0 0 8px; font-size:1rem;">🛡️ Edit Clubs, Custom PNG Emblems &amp; Squads (140 Clubs)</h3>
+            <input type="search" id="of-club-search" class="search-input" style="width:100%; margin-bottom:10px;" placeholder="Filter clubs (e.g. Arsenal, Madrid, Boca, Colo)...">
+            <div class="studio-split">
+              <div id="of-club-list" class="club-list"></div>
+              <div>
+                <div class="card" style="margin-bottom:12px; padding:14px; background:rgba(11,18,32,0.6);">
+                  <div class="form-grid" style="margin:0 0 10px;">
+                    <div class="field">
+                      <label for="of-club-name">Club Name (max 48 chars):</label>
+                      <input type="text" id="of-club-name" class="text-input" maxlength="48">
+                    </div>
+                    <div class="field">
+                      <label for="of-club-abv">3-Letter Scoreboard Abbreviation:</label>
+                      <input type="text" id="of-club-abv" class="text-input" maxlength="3">
+                    </div>
+                  </div>
+                  <div class="toolbar" style="margin-bottom:0; justify-content:space-between;">
+                    <button class="btn" id="btn-save-club">Save Club Name &amp; Abbr</button>
+                    <label class="btn" style="cursor:pointer;">
+                      🖼️ Upload PNG Crest for this Club
+                      <input type="file" id="file-club-crest" accept="image/png,image/jpeg,image/webp" style="display:none;">
+                    </label>
+                  </div>
+                  <div id="status-club-edit" class="status"></div>
+                </div>
+
+                <!-- Squad table -->
+                <div style="font-size:0.88rem; color:var(--muted); margin-bottom:4px;">Click any squad player below to edit name, shirt number, age, or stats:</div>
+                <div class="squad-table-wrap">
+                  <table class="squad-table">
+                    <thead>
+                      <tr>
+                        <th>#</th>
+                        <th>ID</th>
+                        <th>Name</th>
+                        <th>Shirt</th>
+                        <th>Pos</th>
+                        <th>Age</th>
+                        <th>ATK / DEF / SPD</th>
+                        <th>Face</th>
+                      </tr>
+                    </thead>
+                    <tbody id="of-squad-tbody"></tbody>
+                  </table>
+                </div>
+
+                <!-- Selected Player Editor -->
+                <div id="of-player-box" class="card" style="display:none; margin-top:12px; margin-bottom:0; padding:14px; background:rgba(11,18,32,0.6);">
+                  <h4 id="of-player-title" style="margin:0 0 10px; font-size:0.95rem; color:var(--blue);">Edit Player</h4>
+                  <div class="form-grid-3">
+                    <div class="field">
+                      <label for="of-p-name">Player Name (UTF-16, max 15):</label>
+                      <input type="text" id="of-p-name" class="text-input" maxlength="15">
+                    </div>
+                    <div class="field">
+                      <label for="of-p-shirt">Shirt Name (ASCII):</label>
+                      <input type="text" id="of-p-shirt" class="text-input" maxlength="15">
+                    </div>
+                    <div class="field">
+                      <label for="of-p-num">Squad Shirt Number (1–99):</label>
+                      <input type="number" id="of-p-num" class="text-input" min="1" max="99">
+                    </div>
+                  </div>
+                  <div class="form-grid-3">
+                    <div class="field">
+                      <label for="of-p-age">Age (15–46):</label>
+                      <input type="number" id="of-p-age" class="text-input" min="15" max="46">
+                    </div>
+                    <div class="field">
+                      <label for="of-p-height">Height cm (148–211):</label>
+                      <input type="number" id="of-p-height" class="text-input" min="148" max="211">
+                    </div>
+                    <div class="field">
+                      <label for="of-p-atk">Attack / Defence / Speed (1–99):</label>
+                      <div style="display:flex; gap:6px;">
+                        <input type="number" id="of-p-atk" class="text-input" min="1" max="99" title="Attack">
+                        <input type="number" id="of-p-def" class="text-input" min="1" max="99" title="Defence">
+                        <input type="number" id="of-p-spd" class="text-input" min="1" max="99" title="Top Speed">
+                      </div>
+                    </div>
+                  </div>
+                  <div class="toolbar" style="margin-bottom:0; justify-content:space-between;">
+                    <button class="btn" id="btn-save-player">Apply Player Changes</button>
+                    <label class="btn" style="cursor:pointer;">
+                      🧑 Upload Face (PNG / PC .bin) for this Player
+                      <input type="file" id="file-player-face" accept=".png,.jpg,.jpeg,.webp,.bin" style="display:none;">
+                    </label>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 3. Player Faces (Batch Faceserver or Individual) -->
+      <div class="card">
+        <h2><span class="step-badge">STEP 3</span> Player Faces (PC Faceserver Batch or Loose Images)</h2>
+        <p class="hint">Drop a folder or selection of files from a PC patch's <code>kitserver/GDB/faces/</code> (including <code>map.txt</code> + face <code>.png</code> / <code>.bin</code> files), or drop files named by player ID (e.g. <code>1340.png</code>, <code>1340.bin</code>). Every face is landmark-warped to the PSP's 32×64 head UV layout.</p>
+
+        <div class="toolbar">
+          <label class="btn" style="cursor:pointer;">
+            📂 Select Faceserver Folder (<code>GDB/faces</code>)
+            <input type="file" id="file-faces-dir" webkitdirectory directory multiple style="display:none;">
+          </label>
+          <label class="btn" style="cursor:pointer;">
+            🖼️ Add Face Files (<code>map.txt</code>, <code>.png</code>, <code>.bin</code>)
+            <input type="file" id="file-faces-multi" multiple accept=".txt,.png,.jpg,.jpeg,.webp,.bin" style="display:none;">
+          </label>
+          <button class="btn" id="btn-clear-faces" style="display:none;">Clear Faces</button>
+        </div>
+
+        <div class="toolbar" style="margin-top:10px;">
+          <input type="number" id="single-face-id" class="text-input" style="max-width:190px;" min="1" max="32767" placeholder="Player DB ID (e.g. 1340)">
+          <label class="btn" style="cursor:pointer;">
+            ➕ Add Face for this Player ID
+            <input type="file" id="file-face-by-id" accept=".png,.jpg,.jpeg,.webp,.bin" style="display:none;">
+          </label>
+        </div>
+
+        <div id="prog-faces" class="progress-wrap">
+          <div class="progress-bar"><div id="prog-faces-fill" class="progress-fill"></div></div>
+          <div id="prog-faces-text" class="progress-text"></div>
+        </div>
+        <div id="status-faces" class="status"></div>
+        <div id="face-gallery" class="face-gallery" style="display:none;"></div>
+      </div>
+
+      <!-- 4. Full PC Crest Bank (0_text.afs / .flg) -->
+      <div class="card">
+        <h2><span class="step-badge">STEP 4</span> Full League Crest Bank from a PC Patch (Optional)</h2>
+        <p class="hint">If you have a full PES6 PC patch's <code>dat/0_text.afs</code> (or extracted member 536 <code>.flg</code>), drop it here to convert all 169 club crests &amp; national flags into PSP slots <code>2347.bin</code> (32×32) and <code>2350.bin</code> (64×64). <em>Requires loading your PSP <code>pes6.iso</code> in Tab 1 first.</em></p>
+
+        <label class="dropzone" id="dz-crests">
+          <input type="file" id="file-crests" accept=".afs,.flg,.bin">
+          <div class="dz-title">Drop your PC patch's dat/0_text.afs or 64×64 crest .flg here</div>
+          <div class="dz-sub">Converts all 169 crests and requantizes the shared flag/scoreboard palette</div>
+        </label>
+        <div id="status-crests" class="status"></div>
+      </div>
+
+      <!-- 5. Build & Download Patch ZIP -->
+      <div class="card">
+        <h2><span class="step-badge">STEP 5</span> Build &amp; Download Patch for PS Vita</h2>
+        <p class="hint" id="patch-summary-text">Add an Option File, player faces, or a crest bank above, then click below to download the ready-to-install PS Vita patch ZIP.</p>
+        <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px;">
+          <button class="btn btn-primary" id="btn-build-patch" disabled>📦 Build &amp; Download Patch (.zip)</button>
+          <button class="btn" id="btn-download-databin" style="display:none;">💾 Download Edited DATA.BIN Only</button>
+        </div>
+        <div id="status-build-patch" class="status"></div>
+      </div>
+    </section>
+
     <!-- FOLDER CHEATSHEET -->
     <div class="card">
       <h2>📁 Where to copy each file on your PS Vita (with VitaShell)</h2>
@@ -140,13 +346,18 @@
 ├── audio/
 │   ├── e_sound.afs         ← English commentary (PS2 stock or PES6 patch, optional)
 │   └── s_sound.afs         ← Spanish commentary (PS2 stock or PES6 patch, optional)
-└── stadiums/
-    ├── bernabeu.bin        ← Converted stadiums from this page
-    ├── bombonera.bin
-    ├── camp_nou.bin
-    └── ...                 (up to all 38 stadiums)</div>
+├── stadiums/
+│   ├── bernabeu.bin        ← Converted stadiums from this page
+│   ├── bombonera.bin
+│   └── ...                 (up to all 38 stadiums)
+└── mods/
+    └── my-pes6-patch/      ← Unzipped patch from the Patch Creator tab
+        ├── mod.json
+        ├── save/ULES004760013000/{DATA.BIN, PARAM.BIN}
+        ├── faces/{index.txt, &lt;id&gt;.pam}
+        └── afs/0_text.afs/{2347.bin, 2350.bin}</div>
       <p class="hint" style="margin:12px 0 0;">
-        🎮 <strong>In-game:</strong> before kick-off open <em>Match Settings</em> → <strong>Stadium</strong> and <strong>Attendance</strong> (No / Low / Normal / High). Leave Stadium on <em>Random</em> to automatically match the home team's stadium.
+        🎮 <strong>Selecting a patch on PS Vita:</strong> tap <strong>SETTINGS</strong> on the game's LiveArea screen before starting (or hold <strong>L</strong> at boot) and change <strong>Game Patch / Mod</strong> to your patch.
       </p>
     </div>
 
