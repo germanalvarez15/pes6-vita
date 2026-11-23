@@ -103,6 +103,19 @@ The PSP version has no commentary. The port plays **Pro Evolution Soccer 6** com
 
 If both files are present, the game in Spanish uses `s_sound.afs` and any other language uses `e_sound.afs`. To turn commentary off completely, add `PES6_COMMENTARY=0` to `ux0:data/pes6vita/env.txt`.
 
+## Graphics & Settings (LiveArea)
+
+Tap the **Settings** button directly on the game's LiveArea screen (or hold **L** while starting the game) to configure visual and gameplay options before launching:
+
+- **Texture Filtering:** *Bilinear (3D)* (default — smooths pitch, kits, faces, and stadiums while keeping 2D menus sharp), *Bilinear (All)*, or *Sharp (Nearest)*.
+- **Anti-Aliasing:** *Off* or *FXAA* (smooths jagged 3D edges, white pitch lines, and goalposts).
+- **Visual Filter:** *None*, *Sharpen* (pairs well with FXAA), *Vivid*, or *CRT Scanlines*.
+- **Internal Resolution:** *960x544 (2x Native)* or *480x272 (1x Performance)*.
+- **Show FPS Counter:** optional real-time FPS badge in the top-left corner.
+- **Toggles** for commentary, custom stadiums, default attendance, PSP save list, and async GE frame-behind.
+
+Settings are saved to `ux0:data/pes6vita/vita_config.txt`.
+
 ## Folder layout on your PS Vita
 
 ```text

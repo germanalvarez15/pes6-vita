@@ -404,3 +404,48 @@ void screen_list_draw(void) {
     }
     pes6_ge_gl_overlay_image(1, px, LIST_W, LIST_H, changed, (SW - LIST_W) / 2, (SH - LIST_H) / 2, SW, SH);
 }
+
+/* ---- live FPS badge (overlay slot 2) -------------------------------------------------------- */
+#define FPS_W 112
+#define FPS_H 28
+
+static atomic_int g_fps_x10 = -1;               /* -1: hidden; >= 0: fps * 10 */
+
+void screen_fps_update(float fps) {
+    if (fps < 0.0f) { atomic_store_explicit(&g_fps_x10, -1, memory_order_relaxed); return; }
+    int v = (int)(fps * 10.0f + 0.5f);
+    if (v > 999) v = 999;
+    atomic_store_explicit(&g_fps_x10, v, memory_order_relaxed);
+}
+
+void screen_fps_draw(void) {
+    static uint32_t px[FPS_W * FPS_H];
+    static int drawn = -2;
+    const int v = atomic_load_explicit(&g_fps_x10, memory_order_relaxed);
+    if (v < 0) { drawn = -2; return; }
+    const int changed = v != drawn;
+    if (changed) {
+        drawn = v;
+        const uint32_t col = v >= 285 ? RGB(100, 240, 120) : v >= 245 ? RGB(255, 215, 60) : RGB(255, 95, 95);
+        frame(px, FPS_W, FPS_H, 0, 0, FPS_W, FPS_H, RGB(12, 18, 32), col);
+        char s[24];
+        snprintf(s, sizeof s, "%2d.%d FPS", v / 10, v % 10);
+        const int lw = letters(s, sizeof s) * 12;
+        text_in(px, FPS_W, FPS_H, (FPS_W - lw) / 2, 7, 2, s, col);
+    }
+    pes6_ge_gl_overlay_image(2, px, FPS_W, FPS_H, changed, 12, 10, SW, SH);
+}
+
+/* ---- raw canvas primitives for pre-launch screens (vita_config.c) --------------------------- */
+uint32_t *screen_canvas(void) { return g_px; }
+void screen_canvas_present(void) { raw_present(); }
+void screen_fill_rect(uint32_t *px, int pw, int ph, int x, int y, int w, int h, uint32_t color) {
+    fill(px, pw, ph, x, y, w, h, color);
+}
+void screen_frame_rect(uint32_t *px, int pw, int ph, int x, int y, int w, int h, uint32_t inside, uint32_t edge) {
+    frame(px, pw, ph, x, y, w, h, inside, edge);
+}
+void screen_text_at(uint32_t *px, int pw, int ph, int x, int y, int k, const char *s, uint32_t color) {
+    text_in(px, pw, ph, x, y, k, s, color);
+}
+int screen_text_letters(const char *s) { return letters(s, strlen(s)); }

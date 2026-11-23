@@ -44,6 +44,7 @@
 #include "stadiums.h"
 #include "tuning.h"
 #include "version.h"
+#include "vita_config.h"
 
 #include <psp2/apputil.h>
 #include <psp2/audioout.h>
@@ -99,6 +100,7 @@ static const char REF_INPUT[] =
 
 static int g_bench;                   /* PES6_VITA_BENCH=1 */
 static int g_gl;                      /* vitaGL is up (on the GE thread) */
+static vita_config g_cfg;             /* LiveArea settings (vita_config.txt) */
 
 void psp_unimplemented(uint32_t addr, const char *what) {
     static int logged;
@@ -271,8 +273,16 @@ static void load_env(void) {
     setenv("PES6_MENU", "0", 1);
     setenv("PES6_GE_THREADS", "1", 1);                         /* no rasterizer workers */
     setenv("PES6_GE_ASYNC", "1", 1);                           /* the GE on core 1 (0: on the game's) */
-    setenv("PES6_GE_BEHIND", "1", 1);                          /* the GE draws a frame behind the game (0: DrawSync waits) */
+    setenv("PES6_GE_BEHIND", g_cfg.ge_behind ? "1" : "0", 1);  /* the GE draws a frame behind the game (0: DrawSync waits) */
     setenv("PES6_SAS_THREAD", "1", 1);                         /* half the sound mix on core 2 (0: all on core 0) */
+    if (!g_cfg.commentary) setenv("PES6_COMMENTARY", "0", 1);
+    if (!g_cfg.stadiums)   setenv("PES6_STADIUM", "0", 1);
+    if (!g_cfg.save_list)  setenv("PES6_SAVEDATA_LIST", "0", 1);
+    {
+        char crowd_s[4];
+        snprintf(crowd_s, sizeof crowd_s, "%d", g_cfg.attendance);
+        setenv("PES6_CROWD", crowd_s, 1);
+    }
     if (g_bench) {
         setenv("PES6_INPUT", REF_INPUT, 1);
         setenv("PES6_GE_NODRAW", "1", 1);
@@ -326,14 +336,16 @@ static int file_exists(const char *path) {
  * core 1, the sound (output, half the SAS mix) and the profiler's sampler on core 2. vitaGL's
  * own threads keep the masks it gives them (as in the NFS port, no vglSetupGarbageCollector). */
 
-static void pin(const char *what, int mask) {
+static void pin_prio(const char *what, int mask, int prio) {
     const int rc = sceKernelChangeThreadCpuAffinityMask(sceKernelGetThreadId(), mask);
-    fprintf(stderr, "[vita] %s thread 0x%X on core mask 0x%X: 0x%08X\n", what, (unsigned)sceKernelGetThreadId(), (unsigned)mask,
-            (unsigned)rc);
+    const int prc = prio > 0 ? sceKernelChangeThreadPriority(0, prio) : 0;
+    fprintf(stderr, "[vita] %s thread 0x%X on core mask 0x%X (rc 0x%08X) prio %d (rc 0x%08X)\n",
+            what, (unsigned)sceKernelGetThreadId(), (unsigned)mask, (unsigned)rc, prio, (unsigned)prc);
 }
-static void sampler_pin(void) { pin("sampler", SCE_KERNEL_CPU_MASK_USER_2); }
-static void sas_pin(void) { pin("sound mix worker", SCE_KERNEL_CPU_MASK_USER_2); }
-static void atrac_pin(void) { pin("music decoder", SCE_KERNEL_CPU_MASK_USER_2); }
+static void pin(const char *what, int mask) { pin_prio(what, mask, 0); }
+static void sampler_pin(void) { pin_prio("sampler", SCE_KERNEL_CPU_MASK_USER_2, 170); }
+static void sas_pin(void)     { pin_prio("sound mix worker", SCE_KERNEL_CPU_MASK_USER_2, 96); }
+static void atrac_pin(void)   { pin_prio("music decoder", SCE_KERNEL_CPU_MASK_USER_2, 185); }
 
 /* vitaGL compiles shaders at run time with Sony's compiler, which users extract with ShaRKBR33D. */
 static int have_shader_compiler(void) {
@@ -356,8 +368,11 @@ static void gl_start(void) {
     fprintf(stderr, "[vita] vitaGL up: free RAM %u KB, CDRAM %u KB, phycont %u KB\n",
             (unsigned)(vglMemFree(VGL_MEM_RAM) / 1024), (unsigned)(vglMemFree(VGL_MEM_VRAM) / 1024),
             (unsigned)(vglMemFree(VGL_MEM_PHYCONT) / 1024));
-    const int rc = pes6_ge_gl_enable(SCREEN_W / 480);
-    fprintf(stderr, "[vita] GE on the GPU at %dx%d: %s\n", SCREEN_W, SCREEN_H, rc == 0 ? "yes" : "FAILED");
+    const int scale = g_cfg.resolution == 1 ? 1 : (SCREEN_W / 480);
+    const int rc = pes6_ge_gl_enable(scale);
+    if (rc == 0) pes6_ge_gl_set_post(g_cfg.tex_filter, g_cfg.antialiasing, g_cfg.post_filter);
+    fprintf(stderr, "[vita] GE on the GPU at %dx%d (scale %dx): %s\n",
+            480 * scale, 272 * scale, scale, rc == 0 ? "yes" : "FAILED");
     atomic_store(&g_gl_state, rc == 0 ? 1 : -1);
 }
 
@@ -390,7 +405,7 @@ static int stage_sampler(SceSize args, void *argp) {
     for (;;) {
         const unsigned s = pes6_ge_stage;
         if (s < PES6_GE_STAGES) atomic_fetch_add_explicit(&g_stage_hits[s], 1, memory_order_relaxed);
-        sceKernelDelayThread(200);
+        sceKernelDelayThread(500);
     }
     return 0;
 }
@@ -398,7 +413,8 @@ static int stage_sampler(SceSize args, void *argp) {
 static void stage_sampler_start(void) {
     const char *e = getenv("PES6_GE_SAMPLE");
     if (e && e[0] == '0') return;
-    const SceUID th = sceKernelCreateThread("pes6_ge_sample", stage_sampler, 160, 16 * 1024, 0, SCE_KERNEL_CPU_MASK_USER_2, NULL);
+    /* Priority 170: below vjob_thread (120) so sampling never preempts 3D vertex skinning. */
+    const SceUID th = sceKernelCreateThread("pes6_ge_sample", stage_sampler, 170, 16 * 1024, 0, SCE_KERNEL_CPU_MASK_USER_2, NULL);
     if (th >= 0) sceKernelStartThread(th, 0, NULL);
 }
 
@@ -656,6 +672,7 @@ static void show_job(uint64_t fb_stride, uint64_t fmt) {
         pes6_ge_gl_present_pixels(g_pixels, SCREEN_W, SCREEN_H);    /* a buffer the game filled itself (movies) */
     screen_list_draw();                                             /* the save list, over it */
     screen_notice_draw();                                           /* "Data saved" and the like */
+    screen_fps_draw();                                              /* optional live FPS badge */
     const uint64_t t1 = now_ns();
     pes6_ge_stage = PES6_GE_SWAP;
     vglSwapBuffers(GL_FALSE);
@@ -667,26 +684,61 @@ static void show_job(uint64_t fb_stride, uint64_t fmt) {
 
 /* How long each picture stayed on screen, in vblanks: 2 is 30 fps, 3 or more a visible drop. */
 static uint32_t g_hold[5], g_hold_max;
+static uint64_t g_last_asset_reads;
+static uint32_t g_asset_active_vb, g_fast_load_streak;
+
+/* Skip virtual UMD vblank/delay waits while the game is on the loading screen (scene 5) or actively
+ * streaming menu/overlay chunks from disc0:, capped so animations and input stay responsive. */
+static int should_fast_load(void) {
+    static int enabled = -1;
+    if (enabled < 0) {
+        const char *e = getenv("PES6_FAST_LOAD");
+        enabled = !(e && *e == '0');
+    }
+    if (!enabled || g_pick.on || stadiums_blocks_input()) return 0;
+    const uint32_t scene = psp_read32(PES6_SCENE_STACK);
+    if (scene == PES6_SCENE_LOADING) return 1;
+    if ((scene == PES6_SCENE_MENU || scene == PES6_SCENE_EDIT || scene == PES6_SCENE_ML) &&
+        g_asset_active_vb > 0 && g_fast_load_streak < 8) {
+        g_fast_load_streak++;
+        return 1;
+    }
+    return 0;
+}
 
 static void on_vblank(void) {
-    static uint64_t shown = ~0ull, vblanks, last_flip;
+    static uint64_t shown = ~0ull, vblanks, last_flip, last_show_ns;
     vblanks++;
+    const uint64_t cur_reads = psp_io_asset_reads();
+    if (cur_reads != g_last_asset_reads) {
+        g_last_asset_reads = cur_reads;
+        g_asset_active_vb = 3;
+    } else if (g_asset_active_vb > 0) {
+        g_asset_active_vb--;
+    }
     if (g_gl && psp_display_flips() != shown) {
         shown = psp_display_flips();
-        if (last_flip) {
-            const uint64_t held = vblanks - last_flip;
-            g_hold[held < 4 ? held : 4]++;
-            if (held > g_hold_max) g_hold_max = (uint32_t)held;
+        const uint64_t now_t = now_ns();
+        const int fast_skip = (psp_read32(PES6_SCENE_STACK) == PES6_SCENE_LOADING || g_asset_active_vb > 0) &&
+                              now_t - last_show_ns < 16000000ull;
+        if (!fast_skip) {
+            last_show_ns = now_t;
+            g_fast_load_streak = 0;
+            if (last_flip) {
+                const uint64_t held = vblanks - last_flip;
+                g_hold[held < 4 ? held : 4]++;
+                if (held > g_hold_max) g_hold_max = (uint32_t)held;
+            }
+            last_flip = vblanks;
+            if (atomic_load(&g_shows) >= 2) {
+                const uint64_t w0 = now_ns();
+                while (atomic_load(&g_shows) >= 2) sceKernelDelayThread(500);
+                atomic_fetch_add(&g_queue_wait_ns, now_ns() - w0);
+            }
+            atomic_fetch_add(&g_shows, 1);
+            pes6_ge_post(show_job, (uint64_t)psp_display_framebuffer() | (uint64_t)psp_display_stride() << 32,
+                         (uint64_t)(psp_display_format() & 0xFF));
         }
-        last_flip = vblanks;
-        if (atomic_load(&g_shows) >= 2) {
-            const uint64_t w0 = now_ns();
-            while (atomic_load(&g_shows) >= 2) sceKernelDelayThread(500);
-            atomic_fetch_add(&g_queue_wait_ns, now_ns() - w0);
-        }
-        atomic_fetch_add(&g_shows, 1);
-        pes6_ge_post(show_job, (uint64_t)psp_display_framebuffer() | (uint64_t)psp_display_stride() << 32,
-                     (uint64_t)(psp_display_format() & 0xFF));
     }
 
     /* L + R + START + SELECT for two seconds: end the run with the report. */
@@ -703,9 +755,20 @@ static void on_vblank(void) {
         held_since = 0;
     }
 
+    /* Optional live FPS badge in the corner (updates every ~0.5 s). */
+    const uint64_t t = now_ns(), flips = psp_display_flips();
+    if (g_cfg.show_fps) {
+        static uint64_t hud_t0, hud_f0;
+        if (!hud_t0) { hud_t0 = t; hud_f0 = flips; }
+        else if (t - hud_t0 >= 500000000ull) {
+            screen_fps_update((float)((double)(flips - hud_f0) * 1e9 / (double)(t - hud_t0)));
+            hud_t0 = t;
+            hud_f0 = flips;
+        }
+    }
+
     /* Every 10 s: the frame rate the game shows and the GE thread's load, in the log. */
     static uint64_t t0, flips0, ge0, wait0, present0, swap0, queue0;
-    const uint64_t t = now_ns(), flips = psp_display_flips();
     if (!t0) { t0 = t; flips0 = flips; }
     if (t - t0 >= 10000000000ull) {
         uint64_t ge = 0, wait = 0;
@@ -761,11 +824,11 @@ static void status_task(void) {
     pes6_bench_exclude_ns(now_ns() - t0);
 }
 
-/* The settings' quality on the GE thread (pes6_ge_gl_configure: textures and the picture smoothed
- * or not; the resolution stays at x2). */
-static int g_quality;
+/* Apply the LiveArea Settings graphics options on the GE thread. */
 static void configure_job(void) {
-    pes6_ge_gl_configure(0, g_quality == QUALITY_HIGH, g_quality != QUALITY_LOW);
+    const int smooth_present = g_cfg.tex_filter != PES6_TEX_NEAREST || g_cfg.antialiasing != PES6_AA_OFF;
+    pes6_ge_gl_configure(0, g_cfg.tex_filter != PES6_TEX_NEAREST, smooth_present);
+    pes6_ge_gl_set_post(g_cfg.tex_filter, g_cfg.antialiasing, g_cfg.post_filter);
 }
 
 /* ---- setup -------------------------------------------------------------------------------- */
@@ -873,7 +936,6 @@ static int game_thread(SceSize args, void *argp) {
     pes6_settings settings;
     pes6_settings_load(&settings, psp_io_root());
     pes6_settings_current = settings;
-    g_quality = settings.quality;
     pes6_ge_call(configure_job);
     {
         static pes6_version v[PES6_PATCH_MAX + 1];
@@ -918,6 +980,7 @@ static int game_thread(SceSize args, void *argp) {
          * waits, and the vblank hook shows each new frame. */
         audio_start();
         psp_threadman_set_realtime(1);
+        psp_threadman_set_fast_load(should_fast_load);
         psp_set_vblank_hook(on_vblank);
     }
     fprintf(stderr, "entry 0x%08X (%s)\n", PES6_ENTRY, g_bench ? "bench" : "play");
@@ -937,6 +1000,48 @@ int main(void) {
     sceIoMkdir(DATA_DIR, 0777);
     freopen(DATA_DIR "/pes6.log", "w", stderr);
     setvbuf(stderr, NULL, _IOLBF, 0);
+
+    /* Load LiveArea settings (vita_config.txt). If the user tapped the LiveArea Settings button
+     * (psla:-config) or held L while launching, show the pre-launch configurator before booting. */
+    vita_config_load(&g_cfg, DATA_DIR);
+    {
+        SceAppUtilInitParam ip;
+        SceAppUtilBootParam bp;
+        memset(&ip, 0, sizeof ip);
+        memset(&bp, 0, sizeof bp);
+        sceAppUtilInit(&ip, &bp);
+
+        int open_config = 0;
+        SceAppUtilAppEventParam ev;
+        memset(&ev, 0, sizeof ev);
+        if (sceAppUtilReceiveAppEvent(&ev) >= 0 && ev.type == 0x05) {
+            char buf[2048];
+            memset(buf, 0, sizeof buf);
+            if (sceAppUtilAppEventParseLiveArea(&ev, buf) >= 0) {
+                fprintf(stderr, "[vita] LiveArea event: %s\n", buf);
+                if (strstr(buf, "-config")) open_config = 1;
+            }
+        }
+        SceCtrlData pad;
+        memset(&pad, 0, sizeof pad);
+        sceCtrlPeekBufferPositive(0, &pad, 1);
+        if (pad.buttons & (SCE_CTRL_LTRIGGER | SCE_CTRL_L1)) open_config = 1;
+
+        if (open_config) {
+            int lang = -1;
+            sceAppUtilSystemParamGetInt(SCE_SYSTEM_PARAM_ID_LANG, &lang);
+            fprintf(stderr, "[vita] opening LiveArea settings menu (sys_lang=%d)\n", lang);
+            if (!vita_config_menu(&g_cfg, DATA_DIR, lang)) {
+                fprintf(stderr, "[vita] settings saved; returning to LiveArea\n");
+                sceKernelExitProcess(0);
+                return 0;
+            }
+            fprintf(stderr, "[vita] settings saved; launching game\n");
+        }
+    }
+    fprintf(stderr, "[vita] config: tex=%d aa=%d post=%d res=%d fps=%d comm=%d stad=%d att=%d list=%d behind=%d\n",
+            g_cfg.tex_filter, g_cfg.antialiasing, g_cfg.post_filter, g_cfg.resolution, g_cfg.show_fps,
+            g_cfg.commentary, g_cfg.stadiums, g_cfg.attendance, g_cfg.save_list, g_cfg.ge_behind);
 
     /* The biggest stack the kernel grants: 4 MB for the thread itself, the rest are guest
      * threads' host stacks (the game makes ~7). */

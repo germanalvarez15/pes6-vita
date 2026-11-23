@@ -7,6 +7,8 @@
 #ifndef PES6_VITA_SCREEN_H
 #define PES6_VITA_SCREEN_H
 
+#include <stdint.h>
+
 void screen_line(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void screen_clear(void);
 void screen_title(const char *title);
@@ -38,5 +40,17 @@ typedef struct {
 void screen_list_show(const screen_list *l);    /* any thread: shows it, or its new state */
 void screen_list_hide(void);
 void screen_list_draw(void);                    /* GE thread, after the present, before the notice */
+
+/* Live FPS badge in the top-left corner (optional, toggled in LiveArea Settings). */
+void screen_fps_update(float fps);              /* game thread: updates value */
+void screen_fps_draw(void);                     /* GE thread: draws overlay slot 2 when active */
+
+/* Low-level 960x544 software framebuffer primitives (reused by vita_config.c pre-launch UI). */
+uint32_t *screen_canvas(void);
+void screen_canvas_present(void);
+void screen_fill_rect(uint32_t *px, int pw, int ph, int x, int y, int w, int h, uint32_t color);
+void screen_frame_rect(uint32_t *px, int pw, int ph, int x, int y, int w, int h, uint32_t inside, uint32_t edge);
+void screen_text_at(uint32_t *px, int pw, int ph, int x, int y, int k, const char *s, uint32_t color);
+int  screen_text_letters(const char *s);
 
 #endif

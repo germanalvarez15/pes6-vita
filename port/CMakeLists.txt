@@ -20,7 +20,7 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 
 set(VITA_APP_NAME "PES6 Vita")
 set(VITA_TITLEID  "PESV00006")
-set(VITA_VERSION  "00.04")
+set(VITA_VERSION  "00.05")
 # ATTRIBUTE2=12: the extended memory budget; the guest block alone is 128 MB.
 set(VITA_MKSFOEX_FLAGS "${VITA_MKSFOEX_FLAGS} -d PARENTAL_LEVEL=1 -d ATTRIBUTE2=12")
 
@@ -84,6 +84,7 @@ add_library(pes6_host OBJECT
     src/stadiums.c
     src/stubs.c
     src/screen.c
+    src/vita_config.c
     src/vita_stdio_lock.c
     ${RUNTIME_SOURCES}
 )
@@ -148,5 +149,6 @@ vita_create_vpk(pes6vita.vpk ${VITA_TITLEID} eboot.bin
     FILE sce_sys/icon0.png sce_sys/icon0.png
     FILE sce_sys/livearea/contents/bg.png sce_sys/livearea/contents/bg.png
     FILE sce_sys/livearea/contents/startup.png sce_sys/livearea/contents/startup.png
+    FILE sce_sys/livearea/contents/config.png sce_sys/livearea/contents/config.png
     FILE sce_sys/livearea/contents/template.xml sce_sys/livearea/contents/template.xml
 )
