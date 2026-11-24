@@ -227,16 +227,26 @@ export function convertPcToPspDataBin(pcPlain) {
   return psp;
 }
 
-// --- PSP DATA.BIN Editor (Clubs, Leagues, Squads, Players, Custom Emblems) ---
+// --- PSP DATA.BIN Editor (Clubs, National Teams, Leagues, Squads, Formations, Kits, Players, Custom Emblems) ---
 const PLAYER_ADR = 37116 - PCOF_SHIFT;
 const PLAYER_SIZE = 124;
 export const PLAYER_TOTAL = 5000;
 const CLUB_ADR = 751472 - PCOF_SHIFT;
 const CLUB_SIZE = 88;
 export const CLUB_TOTAL = 140;
+const SLOT23 = 664372 - PCOF_SHIFT;
+const NUM23 = 657956 - PCOF_SHIFT;
+const NAT_SQUAD_SIZE = 23;
+export const NAT_TOTAL = 64;
 const SLOT32 = 667730 - PCOF_SHIFT;
 const NUM32 = 659635 - PCOF_SHIFT;
 const SQUAD_SIZE = 32;
+const FORM_ADR = 677202 - PCOF_SHIFT;
+const FORM_SIZE = 364;
+const KIT_ADR = 786332 - PCOF_SHIFT;
+const KIT_SIZE = 544;
+const NAT_KIT_SIZE = 352;
+const NAT_KIT_ADR = KIT_ADR - NAT_TOTAL * NAT_KIT_SIZE;
 const LEAGUE_ADR = 0x2E92 - 5 * 84;
 const LEAGUE_SIZE = 84;
 const EMBLEM_ADR = 911308 - PCOF_SHIFT;
@@ -245,12 +255,147 @@ const EMBLEM_FIRST = 292;
 
 export const POS_NAMES = ["GK", "CWP", "CB", "CB", "SB", "DMF", "WB", "CMF", "SMF", "AMF", "WF", "SS", "CF"];
 
+export const NATIONS = [
+  "Austria", "Belgium", "Bulgaria", "Croatia", "Czech Republic", "Denmark", "England",
+  "Finland", "France", "Germany", "Greece", "Hungary", "Ireland", "Italy", "Latvia",
+  "Netherlands", "Northern Ireland", "Norway", "Poland", "Portugal", "Romania", "Russia",
+  "Scotland", "Serbia & Montenegro", "Slovakia", "Slovenia", "Spain", "Sweden",
+  "Switzerland", "Turkey", "Ukraine", "Wales", "Angola", "Cameroon", "Cote d'Ivoire",
+  "Ghana", "Nigeria", "South Africa", "Togo", "Tunisia", "Costa Rica", "Mexico",
+  "Trinidad & Tobago", "United States", "Argentina", "Brazil", "Chile", "Colombia",
+  "Ecuador", "Paraguay", "Peru", "Uruguay", "Iran", "Japan", "Saudi Arabia",
+  "South Korea", "Australia", "Bosnia & Herzegovina", "Estonia", "Israel", "Honduras",
+  "Jamaica", "Panama", "Bolivia", "Venezuela", "China", "Uzbekistan", "Albania",
+  "Cyprus", "Iceland", "Macedonia", "Armenia", "Belarus", "Georgia", "Liechtenstein",
+  "Lithuania", "Algeria", "Benin", "Burkina Faso", "Cape Verde", "Congo", "DR Congo",
+  "Egypt", "Equatorial Guinea", "Gabon", "Gambia", "Guinea", "Guinea-Bissau", "Kenya",
+  "Liberia", "Libya", "Mali", "Morocco", "Mozambique", "Senegal", "Sierra Leone",
+  "Zambia", "Zimbabwe", "Canada", "Grenada", "Guadeloupe", "Martinique",
+  "Netherlands Antilles", "Oman", "New Zealand", "Free Nationality"
+];
+
+export const NATIONAL_TEAMS = [
+  { id: 0, name: "Austria", abv: "AUT", continent: "nat_europe", color1: "#d62626", color2: "#ffffff" },
+  { id: 1, name: "Belgium", abv: "BEL", continent: "nat_europe", color1: "#d62626", color2: "#f5c518" },
+  { id: 2, name: "Bulgaria", abv: "BUL", continent: "nat_europe", color1: "#ffffff", color2: "#169b62" },
+  { id: 3, name: "Croatia", abv: "CRO", continent: "nat_europe", color1: "#e11d48", color2: "#ffffff" },
+  { id: 4, name: "Czech Republic", abv: "CZE", continent: "nat_europe", color1: "#dc2626", color2: "#1d4ed8" },
+  { id: 5, name: "Denmark", abv: "DEN", continent: "nat_europe", color1: "#c8102e", color2: "#ffffff" },
+  { id: 6, name: "England", abv: "ENG", continent: "nat_europe", color1: "#ffffff", color2: "#1e3a8a" },
+  { id: 7, name: "Finland", abv: "FIN", continent: "nat_europe", color1: "#ffffff", color2: "#003580" },
+  { id: 8, name: "France", abv: "FRA", continent: "nat_europe", color1: "#1e3a8a", color2: "#ef4444" },
+  { id: 9, name: "Germany", abv: "GER", continent: "nat_europe", color1: "#ffffff", color2: "#111827" },
+  { id: 10, name: "Greece", abv: "GRE", continent: "nat_europe", color1: "#0d5eaf", color2: "#ffffff" },
+  { id: 11, name: "Hungary", abv: "HUN", continent: "nat_europe", color1: "#ce2939", color2: "#477050" },
+  { id: 12, name: "Ireland", abv: "IRL", continent: "nat_europe", color1: "#169b62", color2: "#ffffff" },
+  { id: 13, name: "Italy", abv: "ITA", continent: "nat_europe", color1: "#0066cc", color2: "#ffffff" },
+  { id: 14, name: "Latvia", abv: "LVA", continent: "nat_europe", color1: "#9e3039", color2: "#ffffff" },
+  { id: 15, name: "Netherlands", abv: "NED", continent: "nat_europe", color1: "#f97316", color2: "#111827" },
+  { id: 16, name: "Northern Ireland", abv: "NIR", continent: "nat_europe", color1: "#15803d", color2: "#ffffff" },
+  { id: 17, name: "Norway", abv: "NOR", continent: "nat_europe", color1: "#ba0c2f", color2: "#00205b" },
+  { id: 18, name: "Poland", abv: "POL", continent: "nat_europe", color1: "#ffffff", color2: "#dc143c" },
+  { id: 19, name: "Portugal", abv: "POR", continent: "nat_europe", color1: "#991b1b", color2: "#046a38" },
+  { id: 20, name: "Romania", abv: "ROU", continent: "nat_europe", color1: "#fcd116", color2: "#002b7f" },
+  { id: 21, name: "Russia", abv: "RUS", continent: "nat_europe", color1: "#d52b1e", color2: "#0039a6" },
+  { id: 22, name: "Scotland", abv: "SCO", continent: "nat_europe", color1: "#002b5c", color2: "#ffffff" },
+  { id: 23, name: "Serbia & Montenegro", abv: "SCG", continent: "nat_europe", color1: "#1e40af", color2: "#ffffff" },
+  { id: 24, name: "Slovakia", abv: "SVK", continent: "nat_europe", color1: "#ffffff", color2: "#0b4ea2" },
+  { id: 25, name: "Slovenia", abv: "SVN", continent: "nat_europe", color1: "#ffffff", color2: "#15803d" },
+  { id: 26, name: "Spain", abv: "ESP", continent: "nat_europe", color1: "#c60b1e", color2: "#ffc400" },
+  { id: 27, name: "Sweden", abv: "SWE", continent: "nat_europe", color1: "#fecc02", color2: "#006aa7" },
+  { id: 28, name: "Switzerland", abv: "SUI", continent: "nat_europe", color1: "#da291c", color2: "#ffffff" },
+  { id: 29, name: "Turkey", abv: "TUR", continent: "nat_europe", color1: "#e30a17", color2: "#ffffff" },
+  { id: 30, name: "Ukraine", abv: "UKR", continent: "nat_europe", color1: "#ffd700", color2: "#0057b7" },
+  { id: 31, name: "Wales", abv: "WAL", continent: "nat_europe", color1: "#d30731", color2: "#ffffff" },
+  { id: 32, name: "Angola", abv: "ANG", continent: "nat_africa", color1: "#cc092f", color2: "#111827" },
+  { id: 33, name: "Cameroon", abv: "CMR", continent: "nat_africa", color1: "#007a5e", color2: "#ce1126" },
+  { id: 34, name: "Cote d'Ivoire", abv: "CIV", continent: "nat_africa", color1: "#f77f00", color2: "#009e60" },
+  { id: 35, name: "Ghana", abv: "GHA", continent: "nat_africa", color1: "#ffffff", color2: "#fcd116" },
+  { id: 36, name: "Nigeria", abv: "NGA", continent: "nat_africa", color1: "#008751", color2: "#ffffff" },
+  { id: 37, name: "South Africa", abv: "RSA", continent: "nat_africa", color1: "#ffb81c", color2: "#007749" },
+  { id: 38, name: "Togo", abv: "TOG", continent: "nat_africa", color1: "#ffce00", color2: "#006a4e" },
+  { id: 39, name: "Tunisia", abv: "TUN", continent: "nat_africa", color1: "#e70013", color2: "#ffffff" },
+  { id: 40, name: "Costa Rica", abv: "CRC", continent: "nat_americas", color1: "#ce1126", color2: "#002b7f" },
+  { id: 41, name: "Mexico", abv: "MEX", continent: "nat_americas", color1: "#006847", color2: "#ce1126" },
+  { id: 42, name: "Trinidad & Tobago", abv: "TRI", continent: "nat_americas", color1: "#da1a35", color2: "#111827" },
+  { id: 43, name: "United States", abv: "USA", continent: "nat_americas", color1: "#ffffff", color2: "#002868" },
+  { id: 44, name: "Argentina", abv: "ARG", continent: "nat_americas", color1: "#74acdf", color2: "#ffffff" },
+  { id: 45, name: "Brazil", abv: "BRA", continent: "nat_americas", color1: "#ffdf00", color2: "#002776" },
+  { id: 46, name: "Chile", abv: "CHI", continent: "nat_americas", color1: "#d52b1e", color2: "#0039a6" },
+  { id: 47, name: "Colombia", abv: "COL", continent: "nat_americas", color1: "#fcd116", color2: "#003893" },
+  { id: 48, name: "Ecuador", abv: "ECU", continent: "nat_americas", color1: "#ffd100", color2: "#0033a0" },
+  { id: 49, name: "Paraguay", abv: "PAR", continent: "nat_americas", color1: "#d52b1e", color2: "#ffffff" },
+  { id: 50, name: "Peru", abv: "PER", continent: "nat_americas", color1: "#ffffff", color2: "#d91023" },
+  { id: 51, name: "Uruguay", abv: "URU", continent: "nat_americas", color1: "#5bc2e7", color2: "#111827" },
+  { id: 52, name: "Iran", abv: "IRN", continent: "nat_asia", color1: "#ffffff", color2: "#239f40" },
+  { id: 53, name: "Japan", abv: "JPN", continent: "nat_asia", color1: "#00205b", color2: "#ffffff" },
+  { id: 54, name: "Saudi Arabia", abv: "KSA", continent: "nat_asia", color1: "#006c35", color2: "#ffffff" },
+  { id: 55, name: "South Korea", abv: "KOR", continent: "nat_asia", color1: "#ec0f32", color2: "#003478" },
+  { id: 56, name: "Australia", abv: "AUS", continent: "nat_asia", color1: "#ffcd00", color2: "#00843d" },
+  { id: 57, name: "Classic England", abv: "CEN", continent: "nat_asia", color1: "#ffffff", color2: "#c8102e" },
+  { id: 58, name: "Classic France", abv: "CFR", continent: "nat_asia", color1: "#002654", color2: "#ffffff" },
+  { id: 59, name: "Classic Germany", abv: "CGE", continent: "nat_asia", color1: "#ffffff", color2: "#000000" },
+  { id: 60, name: "Classic Italy", abv: "CIT", continent: "nat_asia", color1: "#0066cc", color2: "#ffffff" },
+  { id: 61, name: "Classic Netherlands", abv: "CNE", continent: "nat_asia", color1: "#f97316", color2: "#000000" },
+  { id: 62, name: "Classic Argentina", abv: "CAR", continent: "nat_asia", color1: "#74acdf", color2: "#000000" },
+  { id: 63, name: "Classic Brazil", abv: "CBR", continent: "nat_asia", color1: "#ffdf00", color2: "#009c3b" },
+];
+
+export const SELECT_TEAM_CATEGORIES = [
+  { key: "nat_europe", group: "national", title: "Europe", icon: "🌍", leagueRecord: null },
+  { key: "nat_africa", group: "national", title: "Africa", icon: "🌍", leagueRecord: null },
+  { key: "nat_americas", group: "national", title: "The Americas", icon: "🌎", leagueRecord: null },
+  { key: "nat_asia", group: "national", title: "Asia / Oceania & Classics", icon: "🌏", leagueRecord: null },
+  { key: "club_eng", group: "club", title: "English League", icon: "🦁", leagueRecord: 5, slots: [0, 19] },
+  { key: "club_fra", group: "club", title: "Ligue 1", icon: "⚜️", leagueRecord: 6, slots: [20, 39] },
+  { key: "club_ita", group: "club", title: "Serie A", icon: "🇮🇹", leagueRecord: 7, slots: [40, 59] },
+  { key: "club_ned", group: "club", title: "Eredivisie", icon: "🌷", leagueRecord: 8, slots: [60, 77] },
+  { key: "club_esp", group: "club", title: "Liga Española", icon: "🇪🇸", leagueRecord: 9, slots: [78, 97] },
+  { key: "club_oth_a", group: "club", title: "Other Leagues A", icon: "⭐", leagueRecord: 10, slots: [98, 119] },
+  { key: "club_oth_b", group: "club", title: "Other Leagues B & C", icon: "🛡️", leagueRecord: 11, slots: [120, 139] },
+];
+
+export function roleCodeToLabel(code) {
+  if (code === 0) return "GK";
+  if (code <= 3) return "CB";
+  if (code <= 7) return "CB";
+  if (code === 8) return "LB";
+  if (code === 9) return "RB";
+  if (code <= 14) return "DMF";
+  if (code === 15) return "LWB";
+  if (code === 16) return "RWB";
+  if (code <= 21) return "CMF";
+  if (code === 22) return "LMF";
+  if (code === 23) return "RMF";
+  if (code <= 28) return "AMF";
+  if (code === 29) return "LWF";
+  if (code === 30) return "RWF";
+  if (code <= 35) return "SS";
+  return "CF";
+}
+
+function rgb555ToHex(w) {
+  const r = ((w & 0x1F) << 3) | ((w & 0x1F) >> 2);
+  const g = (((w >> 5) & 0x1F) << 3) | (((w >> 5) & 0x1F) >> 2);
+  const b = (((w >> 10) & 0x1F) << 3) | (((w >> 10) & 0x1F) >> 2);
+  return `#${[r, g, b].map((x) => x.toString(16).padStart(2, "0")).join("")}`;
+}
+
+function hexToRgb555(hex) {
+  const h = (hex || "#ffffff").replace("#", "");
+  const r = parseInt(h.slice(0, 2), 16) || 0;
+  const g = parseInt(h.slice(2, 4), 16) || 0;
+  const b = parseInt(h.slice(4, 6), 16) || 0;
+  return 0x8000 | ((b >> 3) << 10) | ((g >> 3) << 5) | (r >> 3);
+}
+
 const STATS = {
   name_edited: { off: 3, shift: 0, mask: 1 },
   shirt_edited: { off: 3, shift: 1, mask: 1 },
   ability_edited: { off: 40, shift: 4, mask: 1 },
   reg_pos: { off: 6, shift: 4, mask: 0xF },
   height: { off: 41, shift: 0, mask: 0x3F }, // cm - 148
+  weight: { off: 42, shift: 0, mask: 0x7F }, // kg
   age: { off: 65, shift: 9, mask: 0x1F },    // years - 15
   nationality: { off: 65, shift: 0, mask: 0x7F },
   foot: { off: 5, shift: 0, mask: 1 },
@@ -260,11 +405,45 @@ const STATS = {
   stamina: { off: 10, shift: 0, mask: 0x7F },
   top_speed: { off: 11, shift: 0, mask: 0x7F },
   acceleration: { off: 12, shift: 0, mask: 0x7F },
-  dribble_acc: { off: 14, shift: 0, mask: 0x7F },
-  short_pass_acc: { off: 16, shift: 0, mask: 0x7F },
-  shot_acc: { off: 20, shift: 0, mask: 0x7F },
-  shot_power: { off: 21, shift: 0, mask: 0x7F },
+  response: { off: 13, shift: 0, mask: 0x7F },
+  agility: { off: 14, shift: 0, mask: 0x7F },
+  dribble_acc: { off: 15, shift: 0, mask: 0x7F },
+  dribble_spd: { off: 16, shift: 0, mask: 0x7F },
+  short_pass_acc: { off: 17, shift: 0, mask: 0x7F },
+  short_pass_spd: { off: 18, shift: 0, mask: 0x7F },
+  long_pass_acc: { off: 19, shift: 0, mask: 0x7F },
+  long_pass_spd: { off: 20, shift: 0, mask: 0x7F },
+  shot_acc: { off: 21, shift: 0, mask: 0x7F },
+  shot_power: { off: 22, shift: 0, mask: 0x7F },
+  shot_tech: { off: 23, shift: 0, mask: 0x7F },
+  free_kick: { off: 24, shift: 0, mask: 0x7F },
+  curling: { off: 25, shift: 0, mask: 0x7F },
+  header: { off: 26, shift: 0, mask: 0x7F },
+  jump: { off: 27, shift: 0, mask: 0x7F },
+  teamwork: { off: 28, shift: 0, mask: 0x7F },
+  technique: { off: 29, shift: 0, mask: 0x7F },
+  aggression: { off: 30, shift: 0, mask: 0x7F },
+  mentality: { off: 31, shift: 0, mask: 0x7F },
+  gk_ability: { off: 32, shift: 0, mask: 0x7F },
 };
+
+const LOOK_FIELDS = {
+  skin: { off: 87, shift: 14, width: 2 },
+  hair_lo: { off: 91, shift: 8, width: 8 },
+  hair_hi: { off: 92, shift: 8, width: 3 },
+  hair_colour: { off: 93, shift: 8, width: 6 },
+  beard: { off: 94, shift: 8, width: 8 },
+};
+
+export async function loadDefaultOptionFile() {
+  const resp = await fetch("./default_data.bin.zz");
+  if (!resp.ok) throw new Error("Could not load default PES6 database.");
+  const compressed = new Uint8Array(await resp.arrayBuffer());
+  const raw = await zlibInflate(compressed);
+  const of = new PspOptionFile(raw);
+  of.sourceKind = "default_built_in";
+  return of;
+}
 
 export class PspOptionFile {
   constructor(bytes) {
@@ -314,7 +493,7 @@ export class PspOptionFile {
     this.d[a + 83] = 1;
   }
 
-  // --- Clubs (0..139) ---
+  // --- Clubs (0..139) & National Teams (0..63) ---
   getClub(c) {
     const a = CLUB_ADR + c * CLUB_SIZE;
     const nameSlice = this.d.subarray(a, a + 49);
@@ -324,7 +503,27 @@ export class PspOptionFile {
     const az = abvSlice.indexOf(0);
     const abv = this.tdUtf8.decode(az >= 0 ? abvSlice.subarray(0, az) : abvSlice).trim();
     const emblemId = this.d[a + 60] | (this.d[a + 61] << 8);
-    return { id: c, name, abv, emblemId };
+    const r1 = this.d[a + 72], g1 = this.d[a + 73], b1 = this.d[a + 74];
+    const r2 = this.d[a + 76], g2 = this.d[a + 77], b2 = this.d[a + 78];
+    const color1 = `#${[r1, g1, b1].map((x) => x.toString(16).padStart(2, "0")).join("")}`;
+    const color2 = `#${[r2, g2, b2].map((x) => x.toString(16).padStart(2, "0")).join("")}`;
+    const stadiumId = this.d[a + 81];
+    return { isNational: false, id: c, name, abv, emblemId, color1, color2, stadiumId };
+  }
+
+  getNationalTeam(n) {
+    const meta = NATIONAL_TEAMS[n] || { id: n, name: `National #${n}`, abv: "NAT", color1: "#1e3a8a", color2: "#ffffff" };
+    return {
+      isNational: true,
+      id: n,
+      name: meta.name,
+      abv: meta.abv,
+      continent: meta.continent,
+      emblemId: n,
+      color1: meta.color1,
+      color2: meta.color2,
+      stadiumId: 0,
+    };
   }
 
   getAllClubs() {
@@ -333,41 +532,264 @@ export class PspOptionFile {
     return out;
   }
 
-  setClub(c, name, abv) {
+  setClub(c, name, abv, { color1, color2, stadiumId } = {}) {
     const a = CLUB_ADR + c * CLUB_SIZE;
-    const nb = this.teUtf8.encode(name).subarray(0, 48);
-    this.d.fill(0, a, a + 49);
-    this.d.set(nb, a);
-    const ab = this.teUtf8.encode((abv || "").toUpperCase()).subarray(0, 3);
-    this.d.fill(0x20, a + 49, a + 52);
-    this.d.set(ab, a + 49);
-    this.d[a + 56] = 1;
+    if (typeof name === "string") {
+      const nb = this.teUtf8.encode(name).subarray(0, 48);
+      this.d.fill(0, a, a + 49);
+      this.d.set(nb, a);
+      this.d[a + 56] = 1;
+    }
+    if (typeof abv === "string") {
+      const ab = this.teUtf8.encode((abv || "").toUpperCase()).subarray(0, 3);
+      this.d.fill(0x20, a + 49, a + 52);
+      this.d.set(ab, a + 49);
+      // Also update formation header abbreviation
+      const fa = FORM_ADR + (64 + c) * FORM_SIZE;
+      this.d.fill(0, fa + 2, fa + 5);
+      this.d.set(ab, fa + 2);
+    }
+    if (typeof color1 === "string" && color1.startsWith("#") && color1.length === 7) {
+      this.d[a + 72] = parseInt(color1.slice(1, 3), 16) || 0;
+      this.d[a + 73] = parseInt(color1.slice(3, 5), 16) || 0;
+      this.d[a + 74] = parseInt(color1.slice(5, 7), 16) || 0;
+      this.d[a + 75] = 255;
+    }
+    if (typeof color2 === "string" && color2.startsWith("#") && color2.length === 7) {
+      this.d[a + 76] = parseInt(color2.slice(1, 3), 16) || 0;
+      this.d[a + 77] = parseInt(color2.slice(3, 5), 16) || 0;
+      this.d[a + 78] = parseInt(color2.slice(5, 7), 16) || 0;
+      this.d[a + 79] = 255;
+    }
+    if (typeof stadiumId === "number" && stadiumId >= 0 && stadiumId < 38) {
+      this.d[a + 81] = stadiumId;
+      this.d[a + 83] = 1;
+    }
   }
 
-  // --- Squads ---
-  getSquad(c) {
+  // --- Custom Emblems Reader (returns 64x64 Uint8ClampedArray RGBA if slot has custom emblem >= 292) ---
+  getCustomEmblemRgba(emblemId) {
+    const loc = emblemId - EMBLEM_FIRST;
+    if (loc < 0 || loc >= 50) return null;
+    const n = this.d[EMBLEM_ADR - 158 + loc];
+    if (n === 0x99 || n >= 50) return null;
+    const a = EMBLEM_ADR + n * EMBLEM_SIZE;
+    if (this.d[a] !== 1) return null;
+    const pal = [];
+    for (let k = 0; k < 128; k++) {
+      pal.push([
+        this.d[a + 64 + 4 * k],
+        this.d[a + 64 + 4 * k + 1],
+        this.d[a + 64 + 4 * k + 2],
+        this.d[a + 64 + 4 * k + 3],
+      ]);
+    }
+    const rgba = new Uint8ClampedArray(64 * 64 * 4);
+    for (let i = 0; i < 4096; i++) {
+      const idx = this.d[a + 1088 + i] & 0x7F;
+      if (idx > 0) {
+        rgba[i * 4] = pal[idx][0];
+        rgba[i * 4 + 1] = pal[idx][1];
+        rgba[i * 4 + 2] = pal[idx][2];
+        rgba[i * 4 + 3] = pal[idx][3];
+      }
+    }
+    return rgba;
+  }
+
+  // --- Kit Colors (Home, Away, GK Home, GK Away) ---
+  // kitBlock: 1 = Home (1st), 3 = Away (2nd), 0 = GK 1st, 2 = GK 2nd
+  kitRecordBase(isNational, id) {
+    return isNational ? NAT_KIT_ADR + id * NAT_KIT_SIZE : KIT_ADR + id * KIT_SIZE;
+  }
+
+  getTeamKits(isNational, id) {
+    const base = this.kitRecordBase(isNational, id);
+    const readBlock = (unit) => {
+      const a = base + 62 * unit;
+      const w = (idx) => this.d[a + 2 * idx] | (this.d[a + 2 * idx + 1] << 8);
+      return {
+        shirt: rgb555ToHex(w(0)),
+        stripe: rgb555ToHex(w(4)),
+        shorts: rgb555ToHex(w(5)),
+        socks: rgb555ToHex(w(9)),
+      };
+    };
+    return {
+      home: readBlock(1),
+      away: readBlock(3),
+      gk: readBlock(0),
+    };
+  }
+
+  setTeamKitColors(isNational, id, unit, { shirt, stripe, shorts, socks }) {
+    const base = this.kitRecordBase(isNational, id);
+    const a = base + 62 * unit;
+    const writeCol = (idx, hex) => {
+      if (!hex) return;
+      const v = hexToRgb555(hex);
+      this.d[a + 2 * idx] = v & 0xFF;
+      this.d[a + 2 * idx + 1] = (v >>> 8) & 0xFF;
+    };
+    writeCol(0, shirt);  // KIT_SHIRT
+    writeCol(3, shirt);  // KIT_EDGE
+    writeCol(4, stripe || shirt); // KIT_STRIPE
+    writeCol(5, shorts); // KIT_SHORTS
+    writeCol(9, socks);  // KIT_SOCKS
+  }
+
+  // --- Formations & Starting 11 Tactics ---
+  getTeamFormation(isNational, id) {
+    const fIdx = isNational ? id : 64 + id;
+    const fa = FORM_ADR + fIdx * FORM_SIZE;
+    const starters = [];
+    // Slot 0 is GK (fixed at center-bottom of pitch)
+    const gkRole = this.d[fa + 138];
+    starters.push({ slot: 0, x: 8, y: 50, roleCode: gkRole, role: roleCodeToLabel(gkRole) });
+    // Slots 1..10 have (x, y) coordinates at fa + 118 + (i-1)*2 and role at fa + 138 + i
+    for (let i = 1; i < 11; i++) {
+      const x = this.d[fa + 118 + (i - 1) * 2];
+      const y = this.d[fa + 118 + (i - 1) * 2 + 1];
+      const roleCode = this.d[fa + 138 + i];
+      starters.push({ slot: i, x, y, roleCode, role: roleCodeToLabel(roleCode) });
+    }
+    const captainSlot = this.d[fa + 157];
+    const fkLongSlot = this.d[fa + 152];
+    const fkShortSlot = this.d[fa + 153];
+    const cornerLSlot = this.d[fa + 154];
+    const cornerRSlot = this.d[fa + 155];
+    const penaltySlot = this.d[fa + 156];
+    return { starters, captainSlot, fkLongSlot, fkShortSlot, cornerLSlot, cornerRSlot, penaltySlot };
+  }
+
+  setTeamRoles(isNational, id, { captainSlot, fkLongSlot, penaltySlot, cornerLSlot }) {
+    const fIdx = isNational ? id : 64 + id;
+    const fa = FORM_ADR + fIdx * FORM_SIZE;
+    if (typeof captainSlot === "number") this.d[fa + 157] = captainSlot & 0x1F;
+    if (typeof fkLongSlot === "number") { this.d[fa + 152] = fkLongSlot & 0x1F; this.d[fa + 153] = fkLongSlot & 0x1F; }
+    if (typeof cornerLSlot === "number") { this.d[fa + 154] = cornerLSlot & 0x1F; this.d[fa + 155] = cornerLSlot & 0x1F; }
+    if (typeof penaltySlot === "number") this.d[fa + 156] = penaltySlot & 0x1F;
+  }
+
+  swapSquadSlots(isNational, id, slotA, slotB) {
+    const maxSlots = isNational ? NAT_SQUAD_SIZE : SQUAD_SIZE;
+    if (slotA < 0 || slotA >= maxSlots || slotB < 0 || slotB >= maxSlots || slotA === slotB) return;
+    const pBase = isNational ? SLOT23 + id * NAT_SQUAD_SIZE * 2 : SLOT32 + id * SQUAD_SIZE * 2;
+    const nBase = isNational ? NUM23 + id * NAT_SQUAD_SIZE : NUM32 + id * SQUAD_SIZE;
+
+    const pA0 = this.d[pBase + slotA * 2], pA1 = this.d[pBase + slotA * 2 + 1];
+    const pB0 = this.d[pBase + slotB * 2], pB1 = this.d[pBase + slotB * 2 + 1];
+    this.d[pBase + slotA * 2] = pB0;
+    this.d[pBase + slotA * 2 + 1] = pB1;
+    this.d[pBase + slotB * 2] = pA0;
+    this.d[pBase + slotB * 2 + 1] = pA1;
+
+    const numA = this.d[nBase + slotA];
+    this.d[nBase + slotA] = this.d[nBase + slotB];
+    this.d[nBase + slotB] = numA;
+  }
+
+  // --- Squads (Clubs: 32 players, National teams: 23 players) ---
+  getTeamSquad(isNational, id) {
+    const maxSlots = isNational ? NAT_SQUAD_SIZE : SQUAD_SIZE;
+    const pBase = isNational ? SLOT23 + id * NAT_SQUAD_SIZE * 2 : SLOT32 + id * SQUAD_SIZE * 2;
+    const nBase = isNational ? NUM23 + id * NAT_SQUAD_SIZE : NUM32 + id * SQUAD_SIZE;
+    const form = this.getTeamFormation(isNational, id);
     const players = [];
-    for (let s = 0; s < SQUAD_SIZE; s++) {
-      const pOff = SLOT32 + (c * SQUAD_SIZE + s) * 2;
+    for (let s = 0; s < maxSlots; s++) {
+      const pOff = pBase + s * 2;
       const pid = this.d[pOff] | (this.d[pOff + 1] << 8);
-      const num = this.d[NUM32 + c * SQUAD_SIZE + s] + 1;
+      const num = this.d[nBase + s] + 1;
+      const roleInfo = s < 11 ? form.starters[s] : null;
       if (pid > 0 && pid < PLAYER_TOTAL) {
         const p = this.getPlayer(pid);
-        players.push({ slot: s, number: num, ...p });
+        players.push({
+          slot: s,
+          isStarter: s < 11,
+          formRole: roleInfo ? roleInfo.role : "SUB",
+          formX: roleInfo ? roleInfo.x : 0,
+          formY: roleInfo ? roleInfo.y : 0,
+          number: num <= 99 ? num : s + 1,
+          ...p,
+        });
       } else {
-        players.push({ slot: s, number: num, id: 0, name: "(Empty)", shirt: "", pos: "GK", age: 20, height: 180 });
+        players.push({
+          slot: s,
+          isStarter: s < 11,
+          formRole: roleInfo ? roleInfo.role : "SUB",
+          formX: roleInfo ? roleInfo.x : 0,
+          formY: roleInfo ? roleInfo.y : 0,
+          number: num <= 99 ? num : s + 1,
+          id: 0,
+          name: "(Empty)",
+          shirt: "",
+          pos: "GK",
+          posCode: 0,
+          age: 20,
+          height: 180,
+          weight: 75,
+          nationality: 0,
+          ovr: 50,
+        });
       }
     }
     return players;
   }
 
-  setSquadSlot(c, slot, pid, shirtNumber) {
-    const pOff = SLOT32 + (c * SQUAD_SIZE + slot) * 2;
-    this.d[pOff] = pid & 0xFF;
-    this.d[pOff + 1] = (pid >>> 8) & 0xFF;
+  getSquad(c) {
+    return this.getTeamSquad(false, c);
+  }
+
+  setTeamSquadSlot(isNational, id, slot, pid, shirtNumber) {
+    const maxSlots = isNational ? NAT_SQUAD_SIZE : SQUAD_SIZE;
+    if (slot < 0 || slot >= maxSlots) return;
+    const pBase = isNational ? SLOT23 + id * NAT_SQUAD_SIZE * 2 : SLOT32 + id * SQUAD_SIZE * 2;
+    const nBase = isNational ? NUM23 + id * NAT_SQUAD_SIZE : NUM32 + id * SQUAD_SIZE;
+    this.d[pBase + slot * 2] = pid & 0xFF;
+    this.d[pBase + slot * 2 + 1] = (pid >>> 8) & 0xFF;
     if (shirtNumber >= 1 && shirtNumber <= 99) {
-      this.d[NUM32 + c * SQUAD_SIZE + slot] = shirtNumber - 1;
+      this.d[nBase + slot] = shirtNumber - 1;
     }
+  }
+
+  setSquadSlot(c, slot, pid, shirtNumber) {
+    this.setTeamSquadSlot(false, c, slot, pid, shirtNumber);
+  }
+
+  // Search players across the database for transfers / adding to squad
+  searchPlayers(query = "", limit = 50) {
+    const q = query.trim().toLowerCase();
+    const results = [];
+    for (let i = 1; i < PLAYER_TOTAL; i++) {
+      const a = this.padr(i);
+      if (this.d[a] === 0 && this.d[a + 1] === 0) continue;
+      const p = this.getPlayer(i);
+      if (!p.name || p.name.startsWith("Unknown") || p.name.startsWith("(Empty")) continue;
+      if (!q || p.name.toLowerCase().includes(q) || p.shirt.toLowerCase().includes(q) || String(i) === q) {
+        results.push(p);
+        if (results.length >= limit) break;
+      }
+    }
+    return results;
+  }
+
+  // Find an unused player record (4784..4999) to create a brand new player
+  allocateNewPlayer({ name = "New Player", shirt = "NEW PLAYER", posCode = 7, nat = 44, age = 22 } = {}) {
+    let targetId = -1;
+    for (let i = 4784; i < PLAYER_TOTAL; i++) {
+      const a = this.padr(i);
+      if (this.d[a] === 0 && this.d[a + 1] === 0) {
+        targetId = i;
+        break;
+      }
+    }
+    if (targetId < 0) targetId = 4999;
+    // Copy donor attribute block from player #1013 or #185
+    const donorA = this.padr(posCode === 0 ? 300 : 1020) + 48;
+    const dstA = this.padr(targetId) + 48;
+    this.d.set(this.d.subarray(donorA, donorA + 76), dstA);
+    this.setPlayer(targetId, { name, shirt, posCode, nationality: nat, age, height: 178, weight: 74 });
+    return targetId;
   }
 
   // --- Players ---
@@ -391,6 +813,22 @@ export class PspOptionFile {
     this.d[a] = (nw >>> 8) & 0xFF;
   }
 
+  getLook(i, key) {
+    const f = LOOK_FIELDS[key];
+    const a = this.padr(i) + f.off;
+    const w = this.d[a] | (this.d[a + 1] << 8);
+    return (w >>> f.shift) & ((1 << f.width) - 1);
+  }
+
+  setLook(i, key, v) {
+    const f = LOOK_FIELDS[key];
+    const a = this.padr(i) + f.off;
+    const mask = ((1 << f.width) - 1) << f.shift;
+    const w = (this.d[a] | (this.d[a + 1] << 8)) & ~mask | ((v << f.shift) & mask);
+    this.d[a] = w & 0xFF;
+    this.d[a + 1] = (w >>> 8) & 0xFF;
+  }
+
   getPlayer(i) {
     const a = this.padr(i);
     let u16End = 32;
@@ -405,6 +843,35 @@ export class PspOptionFile {
     const sz = shSlice.indexOf(0);
     const shirt = this.tdUtf8.decode(sz >= 0 ? shSlice.subarray(0, sz) : shSlice);
     const posCode = this.getStat(i, "reg_pos");
+    const attack = this.getStat(i, "attack");
+    const defence = this.getStat(i, "defence");
+    const balance = this.getStat(i, "balance");
+    const stamina = this.getStat(i, "stamina");
+    const top_speed = this.getStat(i, "top_speed");
+    const acceleration = this.getStat(i, "acceleration");
+    const response = this.getStat(i, "response");
+    const agility = this.getStat(i, "agility");
+    const dribble_acc = this.getStat(i, "dribble_acc");
+    const dribble_spd = this.getStat(i, "dribble_spd");
+    const short_pass_acc = this.getStat(i, "short_pass_acc");
+    const long_pass_acc = this.getStat(i, "long_pass_acc");
+    const shot_acc = this.getStat(i, "shot_acc");
+    const shot_power = this.getStat(i, "shot_power");
+    const technique = this.getStat(i, "technique");
+    const header = this.getStat(i, "header");
+    const jump = this.getStat(i, "jump");
+    const gk_ability = this.getStat(i, "gk_ability");
+    const mentality = this.getStat(i, "mentality");
+
+    const ovr =
+      posCode === 0
+        ? Math.round((gk_ability + response + balance + mentality + jump) / 5)
+        : Math.round(
+            (attack + defence + balance + stamina + top_speed + acceleration + dribble_acc + short_pass_acc + shot_acc + technique) /
+              10
+          );
+
+    const nationality = this.getStat(i, "nationality");
     return {
       id: i,
       name,
@@ -413,43 +880,86 @@ export class PspOptionFile {
       pos: POS_NAMES[posCode] || "CMF",
       age: this.getStat(i, "age") + 15,
       height: this.getStat(i, "height") + 148,
+      weight: this.getStat(i, "weight"),
+      nationality,
+      nationName: NATIONS[nationality] || "Unknown",
       foot: this.getStat(i, "foot"),
-      attack: this.getStat(i, "attack"),
-      defence: this.getStat(i, "defence"),
-      top_speed: this.getStat(i, "top_speed"),
-      short_pass_acc: this.getStat(i, "short_pass_acc"),
-      shot_acc: this.getStat(i, "shot_acc"),
+      skin: this.getLook(i, "skin"),
+      hairstyle: this.getLook(i, "hair_lo") | (this.getLook(i, "hair_hi") << 8),
+      hair_colour: this.getLook(i, "hair_colour"),
+      beard: this.getLook(i, "beard"),
+      ovr,
+      attack,
+      defence,
+      balance,
+      stamina,
+      top_speed,
+      acceleration,
+      response,
+      agility,
+      dribble_acc,
+      dribble_spd,
+      short_pass_acc,
+      long_pass_acc,
+      shot_acc,
+      shot_power,
+      technique,
+      header,
+      jump,
+      gk_ability,
+      mentality,
     };
   }
 
-  setPlayer(i, { name, shirt, age, height, foot, attack, defence, top_speed, short_pass_acc, shot_acc }) {
+  setPlayer(i, fields) {
     const a = this.padr(i);
-    if (typeof name === "string") {
+    if (typeof fields.name === "string") {
       this.d.fill(0, a, a + 32);
-      const maxChars = Math.min(15, name.length);
+      const maxChars = Math.min(15, fields.name.length);
       for (let k = 0; k < maxChars; k++) {
-        const code = name.charCodeAt(k);
+        const code = fields.name.charCodeAt(k);
         this.d[a + k * 2] = code & 0xFF;
         this.d[a + k * 2 + 1] = (code >>> 8) & 0xFF;
       }
       this.setStat(i, "name_edited", 1);
     }
-    if (typeof shirt === "string") {
-      const clean = shirt.toUpperCase().replace(/[^A-Z0-9 ._-]/g, "");
+    if (typeof fields.shirt === "string") {
+      const clean = fields.shirt.toUpperCase().replace(/[^A-Z0-9 ._-]/g, "");
       this.d.fill(0, a + 32, a + 48);
       for (let k = 0; k < Math.min(15, clean.length); k++) {
         this.d[a + 32 + k] = clean.charCodeAt(k);
       }
       this.setStat(i, "shirt_edited", 1);
     }
-    if (typeof age === "number") this.setStat(i, "age", Math.max(0, Math.min(31, age - 15)));
-    if (typeof height === "number") this.setStat(i, "height", Math.max(0, Math.min(63, height - 148)));
-    if (typeof foot === "number") this.setStat(i, "foot", foot ? 1 : 0);
-    if (typeof attack === "number") { this.setStat(i, "attack", Math.max(1, Math.min(99, attack))); this.setStat(i, "ability_edited", 1); }
-    if (typeof defence === "number") { this.setStat(i, "defence", Math.max(1, Math.min(99, defence))); this.setStat(i, "ability_edited", 1); }
-    if (typeof top_speed === "number") { this.setStat(i, "top_speed", Math.max(1, Math.min(99, top_speed))); this.setStat(i, "ability_edited", 1); }
-    if (typeof short_pass_acc === "number") { this.setStat(i, "short_pass_acc", Math.max(1, Math.min(99, short_pass_acc))); this.setStat(i, "ability_edited", 1); }
-    if (typeof shot_acc === "number") { this.setStat(i, "shot_acc", Math.max(1, Math.min(99, shot_acc))); this.setStat(i, "ability_edited", 1); }
+    if (typeof fields.posCode === "number") this.setStat(i, "reg_pos", Math.max(0, Math.min(12, fields.posCode)));
+    if (typeof fields.nationality === "number") this.setStat(i, "nationality", Math.max(0, Math.min(127, fields.nationality)));
+    if (typeof fields.age === "number") this.setStat(i, "age", Math.max(0, Math.min(31, fields.age - 15)));
+    if (typeof fields.height === "number") this.setStat(i, "height", Math.max(0, Math.min(63, fields.height - 148)));
+    if (typeof fields.weight === "number") this.setStat(i, "weight", Math.max(40, Math.min(127, fields.weight)));
+    if (typeof fields.foot === "number") this.setStat(i, "foot", fields.foot ? 1 : 0);
+    if (typeof fields.skin === "number") this.setLook(i, "skin", Math.max(0, Math.min(3, fields.skin)));
+    if (typeof fields.hairstyle === "number") {
+      const h = Math.max(0, Math.min(2047, fields.hairstyle));
+      this.setLook(i, "hair_lo", h & 0xFF);
+      this.setLook(i, "hair_hi", (h >>> 8) & 7);
+    }
+    if (typeof fields.hair_colour === "number") this.setLook(i, "hair_colour", Math.max(0, Math.min(63, fields.hair_colour)));
+    if (typeof fields.beard === "number") this.setLook(i, "beard", Math.max(0, Math.min(255, fields.beard)));
+
+    const statKeys = [
+      "attack", "defence", "balance", "stamina", "top_speed", "acceleration",
+      "response", "agility", "dribble_acc", "dribble_spd", "short_pass_acc",
+      "long_pass_acc", "shot_acc", "shot_power", "technique", "header", "jump",
+      "gk_ability", "mentality"
+    ];
+    let statEdited = false;
+    for (const k of statKeys) {
+      if (typeof fields[k] === "number" && !Number.isNaN(fields[k])) {
+        this.setStat(i, k, Math.max(1, Math.min(99, fields[k])));
+        statEdited = true;
+      }
+    }
+    if (statEdited) this.setStat(i, "ability_edited", 1);
   }
 
   // --- Custom Club Emblem (64x64 128-color indexed inside Option File, up to 50 slots) ---
@@ -833,6 +1343,26 @@ export class FlgBank {
     return out;
   }
 
+  async decodeEntryRgba(groupIndex, entryId) {
+    const g = this.groups[groupIndex];
+    if (!g) return null;
+    const ent = g.ents.find((e) => e[0] === entryId);
+    if (!ent) return null;
+    const idx = await zlibInflate(ent[1]);
+    const pal = this.palette(groupIndex);
+    const rgba = new Uint8ClampedArray(this.w * this.h * 4);
+    for (let i = 0; i < this.w * this.h; i++) {
+      const c = idx[i];
+      if (c > 0) {
+        rgba[i * 4] = pal[c][0];
+        rgba[i * 4 + 1] = pal[c][1];
+        rgba[i * 4 + 2] = pal[c][2];
+        rgba[i * 4 + 3] = pal[c][3];
+      }
+    }
+    return rgba;
+  }
+
   build() {
     const chunks = [];
     const header = new Uint8Array(this.tablesEnd);
@@ -1046,4 +1576,12 @@ export async function convertPcCrestsToPspBins(pcBank, pspAfs) {
     out[slot] = psp.build();
   }
   return out;
+}
+
+export async function readPspIso64x64FlgBank(pspAfs) {
+  const startByte = 2350 * 0x8000;
+  const h8 = await pspAfs.readBytes(startByte, 8);
+  const size = rd32(h8, 4) + FLG_BASE;
+  const rawPsp = await pspAfs.readBytes(startByte, size);
+  return new FlgBank(rawPsp);
 }

@@ -11,11 +11,17 @@ import {
 
 import {
   PspOptionFile,
+  loadDefaultOptionFile,
   buildDefaultParamBin,
   convertFaceToPam,
   parseFaceserverMap,
   findPcCrestBankInFile,
   convertPcCrestsToPspBins,
+  readPspIso64x64FlgBank,
+  SELECT_TEAM_CATEGORIES,
+  NATIONAL_TEAMS,
+  NATIONS,
+  POS_NAMES,
 } from "./patch_studio.js";
 
 const LANG_NAME = { S: "Spanish", E: "English", F: "French", G: "German", I: "Italian", J: "Japanese" };
@@ -111,6 +117,10 @@ wireDropzone($("dz-psp"), $("file-psp"), async (file) => {
   try {
     pspAfs = await PspIsoAfs.open(file);
     setStatus($("status-psp"), "ok", `✅ European PES6 PSP ISO detected (${pspAfs.discId}). Ready to convert all 38 stadiums!`);
+    readPspIso64x64FlgBank(pspAfs).then((bank) => {
+      studioPspFlgBank = bank;
+      renderSelectTeamGrid();
+    }).catch(() => {});
   } catch (err) {
     pspAfs = null;
     const msg = String(err.message || err);
@@ -314,13 +324,17 @@ wireDropzone($("dz-comm"), $("file-comm"), async (file) => {
   );
 });
 
-// --- Tab 4: Patch Creator (Option File, Visual Editor, Faces & Crests) ---
+// --- Tab 4: Interactive Patch Creator (Select Team Screen & Modal Editor) ---
 let studioOf = null;
-let curClubId = 0;
-let curSquadSlot = -1;
+let curCatKey = "club_eng";
+let curTeamIsNat = false;
+let curTeamId = 0;
+let curSquadSlot = 0;
 let curPlayerId = 0;
+let swapPendingSlot = -1;
 const studioFaces = new Map(); // playerId (number) -> { pam: Uint8Array, rgba: Uint8Array }
 let studioPcCrestBank = null;  // FlgBank from PC 0_text.afs or loose .flg
+let studioPspFlgBank = null;   // FlgBank from PSP pes6.iso slot 2350 (if loaded)
 let studioConvertedCrests = null; // { 2347: Uint8Array, 2350: Uint8Array }
 
 function slugifyId(s) {
@@ -347,143 +361,604 @@ function updateStudioSummary() {
   const nFaces = studioFaces.size;
   const hasCrests = !!studioPcCrestBank;
   $("btn-build-patch").disabled = !hasOf && nFaces === 0 && !hasCrests;
-  $("btn-download-databin").style.display = hasOf ? "inline-block" : "none";
   $("btn-clear-faces").style.display = nFaces > 0 ? "inline-block" : "none";
 
   const parts = [];
-  if (hasOf) parts.push("Option File (save/ULES004760013000/DATA.BIN)");
+  if (hasOf) parts.push("Database / Option File (save/ULES004760013000/DATA.BIN)");
   if (nFaces > 0) parts.push(`${nFaces} player face(s) (faces/*.pam)`);
   if (hasCrests) parts.push("169 PC crests & flags (afs/0_text.afs/{2347,2350}.bin)");
   const id = slugifyId($("mod-id").value);
   $("patch-summary-text").innerHTML = parts.length
     ? `Ready to package <code>mods/${id}/</code> with: <strong>${parts.join(" + ")}</strong>.`
-    : "Add an Option File, player faces, or a crest bank above, then click below to download the ready-to-install PS Vita patch ZIP.";
+    : "Click any team above to edit or import files, then click Build &amp; Download Patch.";
 }
 
-function renderLeagues() {
-  if (!studioOf) return;
-  const sel = $("of-league-sel");
-  const prev = sel.value;
-  sel.innerHTML = "";
-  const leagues = studioOf.getLeagues();
-  for (const l of leagues) {
-    const opt = document.createElement("option");
-    opt.value = String(l.id);
-    opt.textContent = `[League ${l.id - 3}] ${l.name || "(Unnamed)"}`;
-    sel.appendChild(opt);
+// Draw a 64x64 crest or flag onto a canvas:
+// 1. Custom 128-color emblem inside DATA.BIN (emblemId >= 292)
+// 2. Uploaded PC crest bank (if present) or PSP ISO crest bank (if present)
+// 3. Vector shield / flag using the team's primary & secondary colors and 3-letter abbreviation
+async function drawTeamCrestCanvas(canvas, team) {
+  const ctx = canvas.getContext("2d");
+  const w = canvas.width, h = canvas.height;
+  ctx.clearRect(0, 0, w, h);
+
+  if (studioOf && !team.isNational && team.emblemId >= 292) {
+    const customRgba = studioOf.getCustomEmblemRgba(team.emblemId);
+    if (customRgba) {
+      const tmp = document.createElement("canvas");
+      tmp.width = 64; tmp.height = 64;
+      tmp.getContext("2d").putImageData(new ImageData(customRgba, 64, 64), 0, 0);
+      ctx.drawImage(tmp, 0, 0, w, h);
+      return;
+    }
   }
-  if (prev && [...sel.options].some((o) => o.value === prev)) sel.value = prev;
-  const active = leagues.find((l) => String(l.id) === sel.value) || leagues[0];
-  if (active) $("of-league-name").value = active.name;
+
+  const bank = studioPcCrestBank || studioPspFlgBank;
+  if (bank) {
+    const groupIdx = team.isNational ? 0 : 1;
+    const entryId = team.isNational ? team.id : team.emblemId;
+    try {
+      const rgba = await bank.decodeEntryRgba(groupIdx, entryId);
+      if (rgba) {
+        const tmp = document.createElement("canvas");
+        tmp.width = bank.w; tmp.height = bank.h;
+        tmp.getContext("2d").putImageData(new ImageData(rgba, bank.w, bank.h), 0, 0);
+        ctx.drawImage(tmp, 0, 0, w, h);
+        return;
+      }
+    } catch (_) {}
+  }
+
+  // Stylized vector crest / flag fallback with team colors
+  const c1 = team.color1 || "#1d4ed8";
+  const c2 = team.color2 || "#ffffff";
+  ctx.save();
+  if (team.isNational) {
+    // Waving flag badge
+    const r = 8;
+    ctx.beginPath();
+    ctx.roundRect(4, 10, w - 8, h - 20, r);
+    ctx.clip();
+    ctx.fillStyle = c1;
+    ctx.fillRect(4, 10, (w - 8) * 0.55, h - 20);
+    ctx.fillStyle = c2;
+    ctx.fillRect(4 + (w - 8) * 0.55, 10, (w - 8) * 0.45, h - 20);
+    ctx.strokeStyle = "rgba(255,255,255,0.85)";
+    ctx.lineWidth = 2.5;
+    ctx.strokeRect(5, 11, w - 10, h - 22);
+  } else {
+    // Classic PES shield
+    ctx.beginPath();
+    ctx.moveTo(w * 0.5, 4);
+    ctx.lineTo(w - 6, 12);
+    ctx.lineTo(w - 6, h * 0.56);
+    ctx.quadraticCurveTo(w - 6, h * 0.84, w * 0.5, h - 4);
+    ctx.quadraticCurveTo(6, h * 0.84, 6, h * 0.56);
+    ctx.lineTo(6, 12);
+    ctx.closePath();
+    ctx.save();
+    ctx.clip();
+    ctx.fillStyle = c1;
+    ctx.fillRect(0, 0, w * 0.5, h);
+    ctx.fillStyle = c2;
+    ctx.fillRect(w * 0.5, 0, w * 0.5, h);
+    // Diagonal sheen
+    const grad = ctx.createLinearGradient(0, 0, w, h);
+    grad.addColorStop(0, "rgba(255,255,255,0.28)");
+    grad.addColorStop(0.5, "rgba(255,255,255,0.0)");
+    grad.addColorStop(1, "rgba(0,0,0,0.35)");
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, w, h);
+    ctx.restore();
+    ctx.strokeStyle = "#fde047";
+    ctx.lineWidth = 2.5;
+    ctx.stroke();
+  }
+  // Abbreviation badge in center
+  ctx.fillStyle = "rgba(9, 13, 22, 0.78)";
+  ctx.beginPath();
+  ctx.roundRect(w * 0.16, h * 0.36, w * 0.68, h * 0.28, 5);
+  ctx.fill();
+  ctx.fillStyle = "#ffffff";
+  ctx.font = `bold ${Math.round(w * 0.22)}px ui-monospace, SFMono-Regular, Consolas, monospace`;
+  ctx.textAlign = "center";
+  ctx.textBaseline = "middle";
+  ctx.fillText((team.abv || "PES").slice(0, 3), w * 0.5, h * 0.51);
+  ctx.restore();
 }
 
-$("of-league-sel").addEventListener("change", () => {
-  if (!studioOf) return;
+function getCategoryDisplayTitle(cat) {
+  if (!studioOf || !cat.leagueRecord) return cat.title;
   const leagues = studioOf.getLeagues();
-  const active = leagues.find((l) => String(l.id) === $("of-league-sel").value);
-  if (active) $("of-league-name").value = active.name;
+  const rec = leagues.find((l) => l.id === cat.leagueRecord);
+  return rec && rec.name ? rec.name : cat.title;
+}
+
+function renderSelectTeamCategories() {
+  const natGrid = $("pes-cat-national");
+  const clubGrid = $("pes-cat-club");
+  natGrid.innerHTML = "";
+  clubGrid.innerHTML = "";
+
+  for (const cat of SELECT_TEAM_CATEGORIES) {
+    const tile = document.createElement("div");
+    tile.className = `pes-cat-tile${cat.key === curCatKey ? " active" : ""}`;
+    const label = getCategoryDisplayTitle(cat);
+    tile.innerHTML = `<span class="pes-cat-icon">${cat.icon}</span><span class="pes-cat-lbl">${label}</span>`;
+    tile.addEventListener("click", () => {
+      curCatKey = cat.key;
+      $("pes-team-search").value = "";
+      renderSelectTeamCategories();
+      renderSelectTeamGrid();
+    });
+    if (cat.group === "national") natGrid.appendChild(tile);
+    else clubGrid.appendChild(tile);
+  }
+
+  const activeCat = SELECT_TEAM_CATEGORIES.find((c) => c.key === curCatKey) || SELECT_TEAM_CATEGORIES[4];
+  const catTitle = getCategoryDisplayTitle(activeCat);
+  $("pes-current-cat-title").textContent = catTitle;
+  if (activeCat.group === "national") {
+    $("pes-nat-group-title").textContent = `National — ${catTitle}`;
+    $("pes-club-group-title").textContent = "Club";
+    $("pes-league-edit-box").style.display = "none";
+  } else {
+    $("pes-nat-group-title").textContent = "National";
+    $("pes-club-group-title").textContent = `Club — ${catTitle}`;
+    $("pes-league-edit-box").style.display = "block";
+    $("of-league-name").value = catTitle;
+  }
+}
+
+function getTeamsForCurrentView(searchQuery = "") {
+  if (!studioOf) return [];
+  const q = searchQuery.trim().toLowerCase();
+  if (q) {
+    const out = [];
+    for (let c = 0; c < 140; c++) {
+      const club = studioOf.getClub(c);
+      if (club.name.toLowerCase().includes(q) || club.abv.toLowerCase().includes(q)) {
+        out.push(club);
+      }
+    }
+    for (let n = 0; n < 64; n++) {
+      const nat = studioOf.getNationalTeam(n);
+      if (nat.name.toLowerCase().includes(q) || nat.abv.toLowerCase().includes(q)) {
+        out.push(nat);
+      }
+    }
+    return out;
+  }
+
+  const cat = SELECT_TEAM_CATEGORIES.find((c) => c.key === curCatKey) || SELECT_TEAM_CATEGORIES[4];
+  if (cat.group === "national") {
+    return NATIONAL_TEAMS.filter((t) => t.continent === cat.key).map((t) => studioOf.getNationalTeam(t.id));
+  }
+  const [start, end] = cat.slots;
+  const list = [];
+  for (let c = start; c <= end; c++) list.push(studioOf.getClub(c));
+  return list;
+}
+
+function renderSelectTeamGrid() {
+  if (!studioOf) return;
+  const grid = $("pes-crest-grid");
+  grid.innerHTML = "";
+  const q = $("pes-team-search").value;
+  const teams = getTeamsForCurrentView(q);
+
+  if (teams.length > 0) {
+    const focused = teams.find((t) => t.isNational === curTeamIsNat && t.id === curTeamId) || teams[0];
+    $("pes-focused-team-name").textContent = focused.name;
+  } else {
+    $("pes-focused-team-name").textContent = "No teams match search";
+  }
+
+  for (const team of teams) {
+    const tile = document.createElement("div");
+    const isAct = team.isNational === curTeamIsNat && team.id === curTeamId;
+    tile.className = `pes-team-tile${isAct ? " active" : ""}`;
+    const cv = document.createElement("canvas");
+    cv.width = 64;
+    cv.height = 64;
+    drawTeamCrestCanvas(cv, team);
+
+    const nm = document.createElement("div");
+    nm.className = "pes-team-tile-name";
+    nm.textContent = team.name;
+
+    const ab = document.createElement("div");
+    ab.className = "pes-team-tile-abv";
+    ab.textContent = team.abv;
+
+    tile.append(cv, nm, ab);
+    tile.addEventListener("mouseenter", () => {
+      $("pes-focused-team-name").textContent = `${team.name} (${team.abv})`;
+    });
+    tile.addEventListener("click", () => {
+      curTeamIsNat = team.isNational;
+      curTeamId = team.id;
+      openTeamModal(team.isNational, team.id);
+    });
+    grid.appendChild(tile);
+  }
+}
+
+$("pes-team-search").addEventListener("input", () => renderSelectTeamGrid());
+
+$("btn-prev-cat").addEventListener("click", () => {
+  const idx = SELECT_TEAM_CATEGORIES.findIndex((c) => c.key === curCatKey);
+  const next = (idx - 1 + SELECT_TEAM_CATEGORIES.length) % SELECT_TEAM_CATEGORIES.length;
+  curCatKey = SELECT_TEAM_CATEGORIES[next].key;
+  renderSelectTeamCategories();
+  renderSelectTeamGrid();
+});
+$("btn-next-cat").addEventListener("click", () => {
+  const idx = SELECT_TEAM_CATEGORIES.findIndex((c) => c.key === curCatKey);
+  const next = (idx + 1) % SELECT_TEAM_CATEGORIES.length;
+  curCatKey = SELECT_TEAM_CATEGORIES[next].key;
+  renderSelectTeamCategories();
+  renderSelectTeamGrid();
 });
 
 $("btn-save-league").addEventListener("click", () => {
   if (!studioOf) return;
-  const ln = parseInt($("of-league-sel").value, 10);
+  const cat = SELECT_TEAM_CATEGORIES.find((c) => c.key === curCatKey);
+  if (!cat || !cat.leagueRecord) return;
   const name = $("of-league-name").value.trim();
   if (!name) return;
-  studioOf.setLeagueName(ln, name);
-  renderLeagues();
-  setStatus($("status-of"), "ok", `✅ Updated League #${ln - 3} to <strong>${name}</strong>.`);
+  studioOf.setLeagueName(cat.leagueRecord, name);
+  renderSelectTeamCategories();
+  setStatus($("status-of"), "ok", `✅ Renamed league to <strong>${name}</strong>.`);
 });
 
-function renderClubList(filter = "") {
-  if (!studioOf) return;
-  const q = filter.trim().toLowerCase();
-  const listEl = $("of-club-list");
-  listEl.innerHTML = "";
-  const clubs = studioOf.getAllClubs();
-  for (const c of clubs) {
-    if (q && !c.name.toLowerCase().includes(q) && !c.abv.toLowerCase().includes(q) && !String(c.id).includes(q)) {
-      continue;
+// --- Modal Sub-tabs & Team Editor ---
+function switchModalTab(tabName) {
+  document.querySelectorAll(".modal-tab-btn").forEach((b) => {
+    b.classList.toggle("active", b.dataset.mtab === tabName);
+  });
+  document.querySelectorAll(".modal-tab-panel").forEach((p) => {
+    p.classList.toggle("active", p.id === `mtab-${tabName}`);
+  });
+}
+
+document.querySelectorAll(".modal-tab-btn").forEach((btn) => {
+  btn.addEventListener("click", () => switchModalTab(btn.dataset.mtab));
+});
+
+$("btn-close-team-modal").addEventListener("click", () => {
+  $("team-modal-backdrop").style.display = "none";
+  renderSelectTeamGrid();
+});
+$("team-modal-backdrop").addEventListener("click", (e) => {
+  if (e.target === $("team-modal-backdrop")) {
+    $("team-modal-backdrop").style.display = "none";
+    renderSelectTeamGrid();
+  }
+});
+
+function populateModalDropdownsOnce() {
+  const stadSel = $("of-club-stadium");
+  if (!stadSel.options.length) {
+    for (const s of STADIUMS) {
+      if (s.id < 36) {
+        const opt = document.createElement("option");
+        opt.value = String(s.id);
+        opt.textContent = `[${s.id}] ${s.name}`;
+        stadSel.appendChild(opt);
+      }
     }
-    const item = document.createElement("div");
-    item.className = `club-item${c.id === curClubId ? " active" : ""}`;
-    const customBadge = c.emblemId >= 292 ? " 🛡️" : "";
-    item.innerHTML = `<span><span style="color:var(--muted); font-size:0.78rem;">#${c.id}</span> ${c.name || "(Unnamed)"}${customBadge}</span><span class="club-abv">${c.abv || "---"}</span>`;
-    item.addEventListener("click", () => {
-      curClubId = c.id;
-      curSquadSlot = -1;
-      $("of-player-box").style.display = "none";
-      renderClubList($("of-club-search").value);
-      renderSelectedClub();
+  }
+  const posSel = $("of-p-pos");
+  if (!posSel.options.length) {
+    POS_NAMES.forEach((p, idx) => {
+      if (idx === 1 || idx === 3) return; // skip duplicate CB
+      const opt = document.createElement("option");
+      opt.value = String(idx);
+      opt.textContent = p;
+      posSel.appendChild(opt);
     });
-    listEl.appendChild(item);
+  }
+  const natSel = $("of-p-nat");
+  if (!natSel.options.length) {
+    NATIONS.forEach((n, idx) => {
+      const opt = document.createElement("option");
+      opt.value = String(idx);
+      opt.textContent = n;
+      natSel.appendChild(opt);
+    });
   }
 }
 
-function renderSelectedClub() {
+function openTeamModal(isNational, id) {
   if (!studioOf) return;
-  const club = studioOf.getClub(curClubId);
-  $("of-club-name").value = club.name;
-  $("of-club-abv").value = club.abv;
+  populateModalDropdownsOnce();
+  curTeamIsNat = isNational;
+  curTeamId = id;
+  swapPendingSlot = -1;
+  $("transfer-box").style.display = "none";
   $("status-club-edit").className = "status";
+  $("status-player-edit").className = "status";
 
+  const team = isNational ? studioOf.getNationalTeam(id) : studioOf.getClub(id);
+  $("modal-team-badge").textContent = isNational ? `NATIONAL TEAM #${id}` : `CLUB #${id} · EMBLEM #${team.emblemId}`;
+  $("modal-team-title").textContent = `${team.name} (${team.abv})`;
+  drawTeamCrestCanvas($("modal-team-crest"), team);
+
+  $("of-club-name").value = team.name;
+  $("of-club-name").disabled = isNational;
+  $("of-club-abv").value = team.abv;
+  $("of-club-abv").disabled = isNational;
+  $("of-club-stadium").value = String(team.stadiumId < 36 ? team.stadiumId : 0);
+  $("of-club-stadium").disabled = isNational;
+  $("of-club-col1").value = team.color1 || "#d62626";
+  $("of-club-col2").value = team.color2 || "#ffffff";
+  $("lbl-upload-club-crest").style.display = isNational ? "none" : "inline-flex";
+
+  // Kit colors
+  const kits = studioOf.getTeamKits(isNational, id);
+  $("kit-h-shirt").value = kits.home.shirt;
+  $("kit-h-stripe").value = kits.home.stripe;
+  $("kit-h-shorts").value = kits.home.shorts;
+  $("kit-h-socks").value = kits.home.socks;
+  $("kit-a-shirt").value = kits.away.shirt;
+  $("kit-a-stripe").value = kits.away.stripe;
+  $("kit-a-shorts").value = kits.away.shorts;
+  $("kit-a-socks").value = kits.away.socks;
+  $("kit-g-shirt").value = kits.gk.shirt;
+  $("kit-g-stripe").value = kits.gk.stripe;
+  $("kit-g-shorts").value = kits.gk.shorts;
+  $("kit-g-socks").value = kits.gk.socks;
+
+  renderModalSquadAndPitch();
+  const squad = studioOf.getTeamSquad(isNational, id);
+  const firstValid = squad.find((p) => p.id > 0) || squad[0];
+  if (firstValid && firstValid.id > 0) {
+    curSquadSlot = firstValid.slot;
+    curPlayerId = firstValid.id;
+    populatePlayerTab(firstValid);
+  }
+
+  switchModalTab("club");
+  $("team-modal-backdrop").style.display = "flex";
+}
+
+function renderModalSquadAndPitch() {
+  if (!studioOf) return;
+  const squad = studioOf.getTeamSquad(curTeamIsNat, curTeamId);
+  const form = studioOf.getTeamFormation(curTeamIsNat, curTeamId);
+  const kits = studioOf.getTeamKits(curTeamIsNat, curTeamId);
+
+  // 1. Visual Starting XI Pitch
+  const pitch = $("tactics-pitch");
+  pitch.innerHTML = "";
+  for (let s = 0; s < 11; s++) {
+    const p = squad[s];
+    const st = form.starters[s];
+    const dot = document.createElement("div");
+    dot.className = `pitch-dot${s === 0 ? " gk" : ""}${s === curSquadSlot ? " active" : ""}`;
+    // Map PES6 formation (x: 0..52 depth from own goal to attack, y: 0..100 left-to-right)
+    // to vertical pitch (top = attack, bottom = GK)
+    const leftPct = s === 0 ? 50 : Math.max(10, Math.min(90, st.y));
+    const topPct = s === 0 ? 89 : Math.max(12, Math.min(82, 86 - (st.x / 52) * 72));
+    dot.style.left = `${leftPct}%`;
+    dot.style.top = `${topPct}%`;
+
+    const circle = document.createElement("div");
+    circle.className = "pitch-dot-circle";
+    if (s !== 0) {
+      circle.style.background = kits.home.shirt;
+      circle.style.borderColor = kits.home.stripe;
+    }
+    circle.textContent = String(p.number);
+
+    const lbl = document.createElement("div");
+    lbl.className = "pitch-dot-name";
+    lbl.textContent = `${st.role} · ${p.name}`;
+
+    dot.append(circle, lbl);
+    dot.addEventListener("click", () => {
+      if (swapPendingSlot >= 0 && swapPendingSlot !== s) {
+        studioOf.swapSquadSlots(curTeamIsNat, curTeamId, swapPendingSlot, s);
+        swapPendingSlot = -1;
+        renderModalSquadAndPitch();
+        return;
+      }
+      curSquadSlot = s;
+      if (p.id > 0) {
+        curPlayerId = p.id;
+        populatePlayerTab(p);
+        switchModalTab("player");
+      }
+    });
+    pitch.appendChild(dot);
+  }
+
+  // 2. Specialist role dropdowns (Captain, FK, Penalty, Corner)
+  const roleSelects = [
+    ["role-captain", form.captainSlot],
+    ["role-fk", form.fkLongSlot],
+    ["role-pen", form.penaltySlot],
+    ["role-cor", form.cornerLSlot],
+  ];
+  for (const [selId, curVal] of roleSelects) {
+    const sel = $(selId);
+    sel.innerHTML = "";
+    for (let s = 0; s < 11; s++) {
+      const opt = document.createElement("option");
+      opt.value = String(s);
+      opt.textContent = `#${squad[s].number} ${squad[s].name} (${squad[s].formRole})`;
+      sel.appendChild(opt);
+    }
+    sel.value = String(curVal < 11 ? curVal : 0);
+  }
+
+  // 3. Squad Table (Starting XI + Subs)
   const tbody = $("of-squad-tbody");
   tbody.innerHTML = "";
-  const squad = studioOf.getSquad(curClubId);
   for (const p of squad) {
     const tr = document.createElement("tr");
     if (p.slot === curSquadSlot) tr.classList.add("active");
     const hasFace = studioFaces.has(p.id);
+    const roleBadge = p.isStarter
+      ? `<span class="club-abv" style="background:rgba(34,197,94,0.2); color:#86efac;">${p.formRole}</span>`
+      : `<span class="club-abv" style="opacity:0.65;">SUB</span>`;
+    const isSwapping = swapPendingSlot === p.slot;
+
     tr.innerHTML =
+      `<td>${roleBadge}</td>` +
       `<td><strong>${p.number}</strong></td>` +
-      `<td style="color:var(--muted)">${p.id || "-"}</td>` +
-      `<td>${p.name}</td>` +
-      `<td style="font-family:monospace">${p.shirt}</td>` +
+      `<td><strong>${p.name}</strong></td>` +
       `<td><span class="club-abv">${p.pos}</span></td>` +
+      `<td style="color:#fde047; font-weight:700;">${p.id ? p.ovr : "-"}</td>` +
       `<td>${p.id ? p.age : "-"}</td>` +
-      `<td>${p.id ? `${p.attack} / ${p.defence} / ${p.top_speed}` : "-"}</td>` +
-      `<td>${hasFace ? "✅ Face" : "-"}</td>`;
+      `<td>${hasFace ? "✅ 32×64" : "-"}</td>` +
+      `<td><button class="btn btn-swap-slot" style="padding:2px 8px; font-size:0.74rem;">${isSwapping ? "Cancel" : swapPendingSlot >= 0 ? "⇄ Here" : "⇅ Swap"}</button></td>`;
+
+    tr.querySelector(".btn-swap-slot").addEventListener("click", (ev) => {
+      ev.stopPropagation();
+      if (swapPendingSlot < 0) {
+        swapPendingSlot = p.slot;
+      } else if (swapPendingSlot === p.slot) {
+        swapPendingSlot = -1;
+      } else {
+        studioOf.swapSquadSlots(curTeamIsNat, curTeamId, swapPendingSlot, p.slot);
+        swapPendingSlot = -1;
+      }
+      renderModalSquadAndPitch();
+    });
+
     tr.addEventListener("click", () => {
-      if (!p.id) return;
       curSquadSlot = p.slot;
-      curPlayerId = p.id;
-      renderSelectedClub();
-      openPlayerEditor(p);
+      if (p.id > 0) {
+        curPlayerId = p.id;
+        populatePlayerTab(p);
+        switchModalTab("player");
+      } else {
+        $("transfer-box").style.display = "block";
+        $("transfer-search-input").focus();
+      }
     });
     tbody.appendChild(tr);
   }
 }
 
-function openPlayerEditor(p) {
-  $("of-player-box").style.display = "block";
-  $("of-player-title").textContent = `Edit Player #${p.id} — ${p.name} (${p.pos}, Slot ${p.slot + 1})`;
-  $("of-p-name").value = p.name;
-  $("of-p-shirt").value = p.shirt;
-  $("of-p-num").value = p.number;
-  $("of-p-age").value = p.age;
-  $("of-p-height").value = p.height;
-  $("of-p-atk").value = p.attack;
-  $("of-p-def").value = p.defence;
-  $("of-p-spd").value = p.top_speed;
+["role-captain", "role-fk", "role-pen", "role-cor"].forEach((id) => {
+  $(id).addEventListener("change", () => {
+    if (!studioOf) return;
+    studioOf.setTeamRoles(curTeamIsNat, curTeamId, {
+      captainSlot: parseInt($("role-captain").value, 10),
+      fkLongSlot: parseInt($("role-fk").value, 10),
+      penaltySlot: parseInt($("role-pen").value, 10),
+      cornerLSlot: parseInt($("role-cor").value, 10),
+    });
+  });
+});
+
+// --- Transfers & New Player Creation ---
+$("btn-transfer-player").addEventListener("click", () => {
+  const box = $("transfer-box");
+  box.style.display = box.style.display === "none" ? "block" : "none";
+  if (box.style.display === "block") {
+    renderTransferResults($("transfer-search-input").value);
+    $("transfer-search-input").focus();
+  }
+});
+$("btn-close-transfer").addEventListener("click", () => {
+  $("transfer-box").style.display = "none";
+});
+$("transfer-search-input").addEventListener("input", (e) => {
+  renderTransferResults(e.target.value);
+});
+
+function renderTransferResults(query) {
+  if (!studioOf) return;
+  const resEl = $("transfer-results");
+  resEl.innerHTML = "";
+  const hits = studioOf.searchPlayers(query, 40);
+  for (const p of hits) {
+    const row = document.createElement("div");
+    row.className = "club-item";
+    row.innerHTML =
+      `<span><strong>${p.name}</strong> <span style="color:var(--muted); font-size:0.78rem;">(#${p.id} · ${p.nationName} · Age ${p.age})</span></span>` +
+      `<span class="club-abv">${p.pos} · OVR ${p.ovr}</span>`;
+    row.addEventListener("click", () => {
+      const slot = curSquadSlot >= 0 ? curSquadSlot : 0;
+      const squad = studioOf.getTeamSquad(curTeamIsNat, curTeamId);
+      const curNum = squad[slot] ? squad[slot].number : slot + 1;
+      studioOf.setTeamSquadSlot(curTeamIsNat, curTeamId, slot, p.id, curNum);
+      curPlayerId = p.id;
+      $("transfer-box").style.display = "none";
+      renderModalSquadAndPitch();
+    });
+    resEl.appendChild(row);
+  }
 }
 
-$("of-club-search").addEventListener("input", (e) => renderClubList(e.target.value));
+$("btn-create-player").addEventListener("click", () => {
+  if (!studioOf) return;
+  const slot = curSquadSlot >= 0 ? curSquadSlot : 0;
+  const newId = studioOf.allocateNewPlayer({
+    name: "New Player",
+    shirt: "NEW PLAYER",
+    posCode: 12,
+    nat: 44,
+    age: 21,
+  });
+  studioOf.setTeamSquadSlot(curTeamIsNat, curTeamId, slot, newId, slot + 1);
+  curPlayerId = newId;
+  renderModalSquadAndPitch();
+  const updated = studioOf.getTeamSquad(curTeamIsNat, curTeamId)[slot];
+  populatePlayerTab(updated);
+  switchModalTab("player");
+});
 
+// --- Save Team Info & Kit Colors ---
 $("btn-save-club").addEventListener("click", () => {
   if (!studioOf) return;
-  const name = $("of-club-name").value.trim();
-  const abv = $("of-club-abv").value.trim().toUpperCase();
-  if (!name) return;
-  studioOf.setClub(curClubId, name, abv);
-  renderClubList($("of-club-search").value);
-  setStatus($("status-club-edit"), "ok", `✅ Saved club #${curClubId}: <strong>${name} (${abv})</strong>.`);
+  if (!curTeamIsNat) {
+    const name = $("of-club-name").value.trim();
+    const abv = $("of-club-abv").value.trim().toUpperCase();
+    const stadiumId = parseInt($("of-club-stadium").value, 10) || 0;
+    const color1 = $("of-club-col1").value;
+    const color2 = $("of-club-col2").value;
+    studioOf.setClub(curTeamId, name, abv, { color1, color2, stadiumId });
+  }
+  studioOf.setTeamKitColors(curTeamIsNat, curTeamId, 1, {
+    shirt: $("kit-h-shirt").value,
+    stripe: $("kit-h-stripe").value,
+    shorts: $("kit-h-shorts").value,
+    socks: $("kit-h-socks").value,
+  });
+  studioOf.setTeamKitColors(curTeamIsNat, curTeamId, 3, {
+    shirt: $("kit-a-shirt").value,
+    stripe: $("kit-a-stripe").value,
+    shorts: $("kit-a-shorts").value,
+    socks: $("kit-a-socks").value,
+  });
+  studioOf.setTeamKitColors(curTeamIsNat, curTeamId, 0, {
+    shirt: $("kit-g-shirt").value,
+    stripe: $("kit-g-stripe").value,
+    shorts: $("kit-g-shorts").value,
+    socks: $("kit-g-socks").value,
+  });
+
+  const team = curTeamIsNat ? studioOf.getNationalTeam(curTeamId) : studioOf.getClub(curTeamId);
+  $("modal-team-title").textContent = `${team.name} (${team.abv})`;
+  drawTeamCrestCanvas($("modal-team-crest"), team);
+  renderModalSquadAndPitch();
+  renderSelectTeamGrid();
+  setStatus($("status-club-edit"), "ok", `✅ Saved changes for <strong>${team.name}</strong>.`);
 });
 
 $("file-club-crest").addEventListener("change", async (e) => {
-  if (!studioOf || !e.target.files || !e.target.files[0]) return;
+  if (!studioOf || curTeamIsNat || !e.target.files || !e.target.files[0]) return;
   try {
     const file = e.target.files[0];
-    const eid = await studioOf.setClubCustomEmblemFromImage(curClubId, file);
-    renderClubList($("of-club-search").value);
+    const eid = await studioOf.setClubCustomEmblemFromImage(curTeamId, file);
+    const team = studioOf.getClub(curTeamId);
+    drawTeamCrestCanvas($("modal-team-crest"), team);
+    renderSelectTeamGrid();
     setStatus(
       $("status-club-edit"),
       "ok",
@@ -496,21 +971,116 @@ $("file-club-crest").addEventListener("change", async (e) => {
   }
 });
 
+// --- Player Sub-Tab ---
+function drawPlayerFacePreview(pid, skinTone = 0) {
+  const cv = $("player-face-preview");
+  const ctx = cv.getContext("2d");
+  ctx.clearRect(0, 0, 32, 64);
+  if (studioFaces.has(pid)) {
+    const { rgba } = studioFaces.get(pid);
+    ctx.putImageData(new ImageData(new Uint8ClampedArray(rgba), 32, 64), 0, 0);
+    return;
+  }
+  const skinColors = ["#f5cba7", "#e0ac69", "#b87a44", "#5c3818"];
+  ctx.fillStyle = skinColors[skinTone & 3] || "#e0ac69";
+  ctx.fillRect(0, 0, 32, 64);
+  ctx.fillStyle = "rgba(0,0,0,0.45)";
+  ctx.fillRect(7, 17, 4, 3);
+  ctx.fillRect(21, 17, 4, 3);
+  ctx.fillRect(14, 34, 4, 3);
+  ctx.fillRect(10, 45, 12, 3);
+}
+
+function populatePlayerTab(p) {
+  $("of-player-title").textContent = `${p.name} (#${p.number} · DB ID ${p.id} · OVR ${p.ovr})`;
+  $("of-player-sub").textContent = `${p.pos} · ${p.nationName} · Age ${p.age} · ${p.height} cm / ${p.weight} kg`;
+  $("of-p-name").value = p.name;
+  $("of-p-shirt").value = p.shirt;
+  $("of-p-num").value = p.number;
+  $("of-p-pos").value = String(p.posCode === 1 || p.posCode === 3 ? 2 : p.posCode);
+  $("of-p-nat").value = String(p.nationality < NATIONS.length ? p.nationality : 0);
+  $("of-p-age").value = p.age;
+  $("of-p-height").value = p.height;
+  $("of-p-weight").value = p.weight;
+  $("of-p-foot").value = String(p.foot);
+  $("of-p-skin").value = String(p.skin);
+
+  $("of-p-atk").value = p.attack;
+  $("of-p-def").value = p.defence;
+  $("of-p-bal").value = p.balance;
+  $("of-p-sta").value = p.stamina;
+  $("of-p-spd").value = p.top_speed;
+  $("of-p-acc").value = p.acceleration;
+  $("of-p-res").value = p.response;
+  $("of-p-agi").value = p.agility;
+  $("of-p-drb").value = p.dribble_acc;
+  $("of-p-drs").value = p.dribble_spd;
+  $("of-p-spa").value = p.short_pass_acc;
+  $("of-p-lpa").value = p.long_pass_acc;
+  $("of-p-sha").value = p.shot_acc;
+  $("of-p-shp").value = p.shot_power;
+  $("of-p-tec").value = p.technique;
+  $("of-p-hdr").value = p.header;
+  $("of-p-jmp").value = p.jump;
+  $("of-p-gka").value = p.gk_ability;
+
+  drawPlayerFacePreview(p.id, p.skin);
+}
+
+const STAT_INPUT_IDS = [
+  "of-p-atk", "of-p-def", "of-p-bal", "of-p-sta", "of-p-spd", "of-p-acc",
+  "of-p-res", "of-p-agi", "of-p-drb", "of-p-drs", "of-p-spa", "of-p-lpa",
+  "of-p-sha", "of-p-shp", "of-p-tec", "of-p-hdr", "of-p-jmp", "of-p-gka"
+];
+
+function stepAllPlayerStats(delta) {
+  for (const id of STAT_INPUT_IDS) {
+    const v = parseInt($(id).value, 10) || 70;
+    $(id).value = Math.max(1, Math.min(99, v + delta));
+  }
+}
+$("btn-boost-player").addEventListener("click", () => stepAllPlayerStats(5));
+$("btn-nerf-player").addEventListener("click", () => stepAllPlayerStats(-5));
+
 $("btn-save-player").addEventListener("click", () => {
   if (!studioOf || !curPlayerId) return;
-  const name = $("of-p-name").value.trim();
-  const shirt = $("of-p-shirt").value.trim();
   const num = parseInt($("of-p-num").value, 10) || 1;
-  const age = parseInt($("of-p-age").value, 10) || 25;
-  const height = parseInt($("of-p-height").value, 10) || 180;
-  const attack = parseInt($("of-p-atk").value, 10) || 70;
-  const defence = parseInt($("of-p-def").value, 10) || 70;
-  const top_speed = parseInt($("of-p-spd").value, 10) || 70;
-
-  studioOf.setPlayer(curPlayerId, { name, shirt, age, height, attack, defence, top_speed });
-  if (curSquadSlot >= 0) studioOf.setSquadSlot(curClubId, curSquadSlot, curPlayerId, num);
-  renderSelectedClub();
-  setStatus($("status-club-edit"), "ok", `✅ Updated player #${curPlayerId} (<strong>${name}</strong>, #${num}).`);
+  studioOf.setPlayer(curPlayerId, {
+    name: $("of-p-name").value.trim(),
+    shirt: $("of-p-shirt").value.trim(),
+    posCode: parseInt($("of-p-pos").value, 10),
+    nationality: parseInt($("of-p-nat").value, 10),
+    age: parseInt($("of-p-age").value, 10) || 25,
+    height: parseInt($("of-p-height").value, 10) || 180,
+    weight: parseInt($("of-p-weight").value, 10) || 75,
+    foot: parseInt($("of-p-foot").value, 10) || 0,
+    skin: parseInt($("of-p-skin").value, 10) || 0,
+    attack: parseInt($("of-p-atk").value, 10),
+    defence: parseInt($("of-p-def").value, 10),
+    balance: parseInt($("of-p-bal").value, 10),
+    stamina: parseInt($("of-p-sta").value, 10),
+    top_speed: parseInt($("of-p-spd").value, 10),
+    acceleration: parseInt($("of-p-acc").value, 10),
+    response: parseInt($("of-p-res").value, 10),
+    agility: parseInt($("of-p-agi").value, 10),
+    dribble_acc: parseInt($("of-p-drb").value, 10),
+    dribble_spd: parseInt($("of-p-drs").value, 10),
+    short_pass_acc: parseInt($("of-p-spa").value, 10),
+    long_pass_acc: parseInt($("of-p-lpa").value, 10),
+    shot_acc: parseInt($("of-p-sha").value, 10),
+    shot_power: parseInt($("of-p-shp").value, 10),
+    technique: parseInt($("of-p-tec").value, 10),
+    header: parseInt($("of-p-hdr").value, 10),
+    jump: parseInt($("of-p-jmp").value, 10),
+    gk_ability: parseInt($("of-p-gka").value, 10),
+  });
+  if (curSquadSlot >= 0) {
+    studioOf.setTeamSquadSlot(curTeamIsNat, curTeamId, curSquadSlot, curPlayerId, num);
+  }
+  renderModalSquadAndPitch();
+  const updated = studioOf.getTeamSquad(curTeamIsNat, curTeamId)[curSquadSlot];
+  if (updated) populatePlayerTab(updated);
+  setStatus($("status-player-edit"), "ok", `✅ Saved changes for player #${curPlayerId} (<strong>${$("of-p-name").value}</strong>).`);
 });
 
 $("file-player-face").addEventListener("change", async (e) => {
@@ -518,50 +1088,68 @@ $("file-player-face").addEventListener("change", async (e) => {
   try {
     const res = await convertFaceToPam(e.target.files[0]);
     studioFaces.set(curPlayerId, res);
+    drawPlayerFacePreview(curPlayerId);
     renderFaceGallery();
-    renderSelectedClub();
+    renderModalSquadAndPitch();
     updateStudioSummary();
-    setStatus($("status-club-edit"), "ok", `✅ Converted &amp; linked 32×64 face for player #${curPlayerId} (<code>faces/${curPlayerId}.pam</code>).`);
+    setStatus($("status-player-edit"), "ok", `✅ Warped &amp; linked 32×64 photo face for player #${curPlayerId} (<code>faces/${curPlayerId}.pam</code>).`);
   } catch (err) {
-    setStatus($("status-club-edit"), "err", `❌ ${err.message || err}`);
+    setStatus($("status-player-edit"), "err", `❌ ${err.message || err}`);
   } finally {
     e.target.value = "";
   }
 });
 
-wireDropzone($("dz-of"), $("file-of"), async (file) => {
+// --- Load Custom Option File or Reset to Default ---
+$("file-of").addEventListener("change", async (e) => {
+  if (!e.target.files || !e.target.files[0]) return;
+  const file = e.target.files[0];
   try {
     studioOf = await PspOptionFile.fromFile(file);
-    curClubId = 0;
-    curSquadSlot = -1;
-    $("of-editor").style.display = "block";
-    $("of-player-box").style.display = "none";
-    renderLeagues();
-    renderClubList();
-    renderSelectedClub();
+    renderSelectTeamCategories();
+    renderSelectTeamGrid();
     updateStudioSummary();
-    const kindLabel =
-      studioOf.sourceKind === "pc_encrypted"
-        ? "Encrypted PES6 PC Option File (decrypted &amp; converted to PSP layout)"
-        : studioOf.sourceKind === "pc_plain"
-        ? "Decrypted PES6 PC Option File (converted to PSP layout)"
-        : "Unencrypted PES6 PSP System Save (DATA.BIN)";
+    $("pes-db-badge").textContent = `Loaded: ${file.name}`;
     setStatus(
       $("status-of"),
       "ok",
-      `✅ Loaded <strong>${file.name}</strong> — ${kindLabel}. Use the editor below to customize leagues, clubs, emblems, or squads.`
+      `✅ Loaded <strong>${file.name}</strong> into the interactive Select Team grid below!`
     );
   } catch (err) {
-    studioOf = null;
-    $("of-editor").style.display = "none";
-    updateStudioSummary();
     setStatus(
       $("status-of"),
       "err",
-      `❌ Not a valid PES6 PC Option File (KONAMI-WIN32PES6OPT) or PSP DATA.BIN (${err.message || err}). Must be 1,191,936 bytes.`
+      `❌ Not a valid PES6 PC Option File (KONAMI-WIN32PES6OPT) or PSP DATA.BIN (${err.message || err}).`
     );
+  } finally {
+    e.target.value = "";
   }
 });
+
+$("btn-reset-default-of").addEventListener("click", async () => {
+  try {
+    studioOf = await loadDefaultOptionFile();
+    renderSelectTeamCategories();
+    renderSelectTeamGrid();
+    updateStudioSummary();
+    $("pes-db-badge").textContent = "Default PES6 Database (204 Teams · 5,000 Players)";
+    setStatus($("status-of"), "info", "🔄 Reset to the default PES6 teams, leagues, and squads.");
+  } catch (err) {
+    setStatus($("status-of"), "err", `❌ ${err.message || err}`);
+  }
+});
+
+// Auto-load the built-in default PES6 database at startup so the user can edit immediately
+loadDefaultOptionFile()
+  .then((of) => {
+    if (!studioOf) {
+      studioOf = of;
+      renderSelectTeamCategories();
+      renderSelectTeamGrid();
+      updateStudioSummary();
+    }
+  })
+  .catch(() => {});
 
 // --- Faces Batch & Individual ---
 function renderFaceGallery() {
@@ -674,7 +1262,6 @@ async function handleBatchFaces(fileList) {
   $("prog-faces-fill").style.width = "100%";
   $("prog-faces-text").textContent = `Converted ${okCount} face(s).`;
   renderFaceGallery();
-  if (studioOf) renderSelectedClub();
   updateStudioSummary();
   setStatus(
     $("status-faces"),
@@ -703,7 +1290,6 @@ $("file-face-by-id").addEventListener("change", async (e) => {
     const res = await convertFaceToPam(e.target.files[0]);
     studioFaces.set(pid, res);
     renderFaceGallery();
-    if (studioOf) renderSelectedClub();
     updateStudioSummary();
     setStatus($("status-faces"), "ok", `✅ Added face for Player #${pid} (<code>faces/${pid}.pam</code>). Total faces: ${studioFaces.size}.`);
   } catch (err) {
@@ -716,7 +1302,6 @@ $("file-face-by-id").addEventListener("change", async (e) => {
 $("btn-clear-faces").addEventListener("click", () => {
   studioFaces.clear();
   renderFaceGallery();
-  if (studioOf) renderSelectedClub();
   updateStudioSummary();
   $("status-faces").className = "status";
 });
@@ -728,6 +1313,7 @@ wireDropzone($("dz-crests"), $("file-crests"), async (file) => {
   try {
     const bank = await findPcCrestBankInFile(file);
     studioPcCrestBank = bank;
+    renderSelectTeamGrid();
     updateStudioSummary();
     setStatus(
       $("status-crests"),

@@ -132,19 +132,31 @@
       </div>
     </section>
 
-    <!-- TAB 4: PATCH CREATOR (TEAMS, SQUADS, FACES & CRESTS) -->
+    <!-- TAB 4: PATCH CREATOR (INTERACTIVE SELECT TEAM & VISUAL EDITOR) -->
     <section id="tab-studio" class="panel">
-      <!-- 1. Patch Metadata -->
+      <!-- Top Bar: Patch Info & Quick Load/Save -->
       <div class="card">
-        <h2><span class="step-badge">STEP 1</span> Patch Info (<code>mod.json</code>)</h2>
-        <p class="hint">Create a custom patch for PS Vita. Once copied to <code>ux0:data/pes6vita/mods/&lt;id&gt;/</code>, you can select it from the <strong>SETTINGS</strong> button on the game's LiveArea screen (each patch keeps its own separate saves).</p>
+        <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px;">
+          <div>
+            <h2 style="margin:0;">⚽ Interactive Patch Creator — Select Team &amp; Edit</h2>
+            <p class="hint" style="margin:4px 0 0;">The default PES6 database is already loaded below! Click any league or team to open its interactive panel and edit its crest, name, kit colors, tactics, squad, player stats &amp; faces.</p>
+          </div>
+          <div style="display:flex; flex-wrap:wrap; gap:8px;">
+            <label class="btn" style="cursor:pointer;">
+              📂 Load PC Option File / PSP DATA.BIN
+              <input type="file" id="file-of" accept=".bin,*" style="display:none;">
+            </label>
+            <button class="btn" id="btn-reset-default-of" title="Reset database to default PES6 teams &amp; squads">🔄 Reset to Default PES6</button>
+          </div>
+        </div>
+
         <div class="form-grid-3">
           <div class="field">
-            <label for="mod-name">Patch Name (shown in LiveArea Settings):</label>
+            <label for="mod-name">Patch Name (shown in PS Vita LiveArea Settings):</label>
             <input type="text" id="mod-name" class="text-input" value="My PES6 Patch" placeholder="Season 2026 Patch">
           </div>
           <div class="field">
-            <label for="mod-id">Folder ID (lowercase, no spaces):</label>
+            <label for="mod-id">Folder ID (<code>ux0:data/pes6vita/mods/&lt;id&gt;</code>):</label>
             <input type="text" id="mod-id" class="text-input" value="my-pes6-patch" placeholder="season-2026">
           </div>
           <div class="field">
@@ -152,186 +164,376 @@
             <input type="text" id="mod-author" class="text-input" value="Community · v1.0" placeholder="Author · v1.0">
           </div>
         </div>
+        <div id="status-of" class="status"></div>
       </div>
 
-      <!-- 2. Option File + Visual Editor -->
-      <div class="card">
-        <h2><span class="step-badge">STEP 2</span> Teams, Squads &amp; Players (Option File + Visual Editor)</h2>
-        <p class="hint">Upload a <strong>PES6 PC Option File</strong> (<code>KONAMI-WIN32PES6OPT</code>, automatically decrypted and converted to PSP layout) or a <strong>PSP <code>DATA.BIN</code></strong>. You can then inspect and edit leagues, clubs, custom PNG emblems, squads, and player stats directly below.</p>
-
-        <div class="compat-note">
-          <span class="pill pill-ok">✅ Supported: PES6 PC Option File (KONAMI-WIN32PES6OPT) &amp; PSP DATA.BIN (1,191,936 bytes)</span>
+      <!-- PES6 "SELECT TEAM" INTERACTIVE SCREEN -->
+      <div class="pes-select-screen">
+        <div class="pes-select-topbar">
+          <span class="pes-select-title">Select Team</span>
+          <input type="search" id="pes-team-search" class="pes-search" placeholder="🔍 Quick search team or player...">
+          <span id="pes-db-badge" class="pes-db-badge">Default PES6 Database (204 Teams · 5,000 Players)</span>
         </div>
 
-        <label class="dropzone" id="dz-of">
-          <input type="file" id="file-of" accept=".bin,*">
-          <div class="dz-title">Drop your KONAMI-WIN32PES6OPT (PC) or DATA.BIN (PSP) here</div>
-          <div class="dz-sub">Automatically decrypts PC Option Files and aligns blocks 3–8 &amp; leagues for PS Vita</div>
-        </label>
-        <div id="status-of" class="status"></div>
+        <div class="pes-select-body">
+          <!-- LEFT COLUMN: Categories (National & Club Leagues, just like PES6) -->
+          <div class="pes-cat-col">
+            <div class="pes-cat-box">
+              <div class="pes-cat-header" id="pes-nat-group-title">National</div>
+              <div class="pes-cat-grid" id="pes-cat-national"></div>
+            </div>
 
-        <!-- Visual Editor (shown once an Option File is loaded) -->
-        <div id="of-editor" style="display:none; margin-top:18px;">
-          <!-- Leagues -->
-          <div style="border-top:1px solid var(--border); padding-top:14px; margin-bottom:14px;">
-            <h3 style="margin:0 0 8px; font-size:1rem;">🏆 Edit League Names</h3>
-            <div class="toolbar">
-              <select id="of-league-sel" class="select-input" style="max-width:260px;"></select>
-              <input type="text" id="of-league-name" class="text-input" style="flex:1; min-width:180px;" maxlength="20" placeholder="League name (up to 20 chars)">
-              <button class="btn" id="btn-save-league">Apply League Name</button>
+            <div class="pes-cat-box" style="margin-top:14px;">
+              <div class="pes-cat-header" id="pes-club-group-title">Club</div>
+              <div class="pes-cat-grid" id="pes-cat-club"></div>
+            </div>
+
+            <!-- Rename Selected League Bar (when a Club League is active) -->
+            <div class="pes-league-edit-box" id="pes-league-edit-box" style="display:none;">
+              <label for="of-league-name">Rename League:</label>
+              <div style="display:flex; gap:6px; margin-top:4px;">
+                <input type="text" id="of-league-name" class="text-input" maxlength="20" placeholder="League Name">
+                <button class="btn" id="btn-save-league" style="white-space:nowrap;">Save</button>
+              </div>
             </div>
           </div>
 
-          <!-- Clubs, Emblems & Squads -->
-          <div style="border-top:1px solid var(--border); padding-top:14px;">
-            <h3 style="margin:0 0 8px; font-size:1rem;">🛡️ Edit Clubs, Custom PNG Emblems &amp; Squads (140 Clubs)</h3>
-            <input type="search" id="of-club-search" class="search-input" style="width:100%; margin-bottom:10px;" placeholder="Filter clubs (e.g. Arsenal, Madrid, Boca, Colo)...">
-            <div class="studio-split">
-              <div id="of-club-list" class="club-list"></div>
+          <!-- RIGHT COLUMN: League Banner + 4-Column Crest Grid -->
+          <div class="pes-teams-col">
+            <div class="pes-focused-team-name" id="pes-focused-team-name">Select a team to edit</div>
+            <div class="pes-teams-box">
+              <div class="pes-league-bar">
+                <button class="pes-l1r1" id="btn-prev-cat" title="Previous Category">L1</button>
+                <span id="pes-current-cat-title">English League</span>
+                <button class="pes-l1r1" id="btn-next-cat" title="Next Category">R1</button>
+              </div>
+              <div class="pes-crest-grid" id="pes-crest-grid"></div>
+            </div>
+            <div class="pes-select-hint">💡 Click any team crest above to open the <strong>Team, Tactics, Kits &amp; Squad Editor</strong></div>
+          </div>
+        </div>
+      </div>
+
+      <!-- INTERACTIVE TEAM & SQUAD MODAL DRAWER (Opens when clicking a team) -->
+      <div id="team-modal-backdrop" class="team-modal-backdrop" style="display:none;">
+        <div class="team-modal">
+          <!-- Modal Header -->
+          <div class="team-modal-header">
+            <div style="display:flex; align-items:center; gap:14px;">
+              <canvas id="modal-team-crest" width="64" height="64" class="modal-crest-canvas"></canvas>
               <div>
-                <div class="card" style="margin-bottom:12px; padding:14px; background:rgba(11,18,32,0.6);">
-                  <div class="form-grid" style="margin:0 0 10px;">
+                <div id="modal-team-badge" style="font-size:0.78rem; color:var(--blue); font-weight:700; text-transform:uppercase;">CLUB #0</div>
+                <h3 id="modal-team-title" style="margin:2px 0 0; font-size:1.35rem;">Arsenal</h3>
+              </div>
+            </div>
+            <button class="btn" id="btn-close-team-modal" style="font-size:1rem; padding:6px 14px;">✕ Done</button>
+          </div>
+
+          <!-- Modal Sub-tabs -->
+          <div class="team-modal-tabs">
+            <button class="modal-tab-btn active" data-mtab="club">🛡️ Team Info, Crest &amp; Kits</button>
+            <button class="modal-tab-btn" data-mtab="squad">📋 Squad, Tactics &amp; Transfers</button>
+            <button class="modal-tab-btn" data-mtab="player" id="mtab-btn-player">🏃 Edit Selected Player &amp; Face</button>
+          </div>
+
+          <!-- SUB-TAB 1: TEAM INFO, CREST & KIT COLORS -->
+          <div id="mtab-club" class="modal-tab-panel active">
+            <div class="form-grid-3">
+              <div class="field">
+                <label for="of-club-name">Team Name (max 48 chars):</label>
+                <input type="text" id="of-club-name" class="text-input" maxlength="48">
+              </div>
+              <div class="field">
+                <label for="of-club-abv">Scoreboard Abbr (3 letters):</label>
+                <input type="text" id="of-club-abv" class="text-input" maxlength="3">
+              </div>
+              <div class="field">
+                <label for="of-club-stadium">Home Stadium:</label>
+                <select id="of-club-stadium" class="select-input"></select>
+              </div>
+            </div>
+
+            <div class="form-grid" style="align-items:center;">
+              <div class="card" style="margin:0; padding:14px; background:rgba(11,18,32,0.6);">
+                <h4 style="margin:0 0 8px; font-size:0.95rem;">🛡️ Team Crest / Flag &amp; Banner Colors</h4>
+                <div style="display:flex; flex-wrap:wrap; align-items:center; gap:12px;">
+                  <label class="btn" id="lbl-upload-club-crest" style="cursor:pointer;">
+                    🖼️ Upload PNG Crest
+                    <input type="file" id="file-club-crest" accept="image/png,image/jpeg,image/webp" style="display:none;">
+                  </label>
+                  <div style="display:flex; align-items:center; gap:8px; font-size:0.85rem; color:var(--muted);">
+                    <span>Primary:</span>
+                    <input type="color" id="of-club-col1" value="#d62626" class="color-picker">
+                    <span>Secondary:</span>
+                    <input type="color" id="of-club-col2" value="#ffffff" class="color-picker">
+                  </div>
+                </div>
+                <p class="hint" style="margin:8px 0 0; font-size:0.8rem;">Solid white/colored backgrounds on uploaded PNGs are automatically made transparent and quantized to 64×64.</p>
+              </div>
+
+              <!-- Kit Colors (Radar, Strip Selection & Generated Kits) -->
+              <div class="card" style="margin:0; padding:14px; background:rgba(11,18,32,0.6);">
+                <h4 style="margin:0 0 8px; font-size:0.95rem;">👕 Kit Colors (1st, 2nd &amp; Goalkeeper)</h4>
+                <div class="kit-color-rows">
+                  <div class="kit-row">
+                    <span class="kit-lbl">Home (1st):</span>
+                    <label>Shirt <input type="color" id="kit-h-shirt" class="color-picker"></label>
+                    <label>Stripe <input type="color" id="kit-h-stripe" class="color-picker"></label>
+                    <label>Shorts <input type="color" id="kit-h-shorts" class="color-picker"></label>
+                    <label>Socks <input type="color" id="kit-h-socks" class="color-picker"></label>
+                  </div>
+                  <div class="kit-row">
+                    <span class="kit-lbl">Away (2nd):</span>
+                    <label>Shirt <input type="color" id="kit-a-shirt" class="color-picker"></label>
+                    <label>Stripe <input type="color" id="kit-a-stripe" class="color-picker"></label>
+                    <label>Shorts <input type="color" id="kit-a-shorts" class="color-picker"></label>
+                    <label>Socks <input type="color" id="kit-a-socks" class="color-picker"></label>
+                  </div>
+                  <div class="kit-row">
+                    <span class="kit-lbl">Goalkeeper:</span>
+                    <label>Shirt <input type="color" id="kit-g-shirt" class="color-picker"></label>
+                    <label>Stripe <input type="color" id="kit-g-stripe" class="color-picker"></label>
+                    <label>Shorts <input type="color" id="kit-g-shorts" class="color-picker"></label>
+                    <label>Socks <input type="color" id="kit-g-socks" class="color-picker"></label>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div style="margin-top:14px; display:flex; align-items:center; justify-content:space-between; gap:12px;">
+              <button class="btn btn-primary" id="btn-save-club">💾 Save Team Info &amp; Kit Colors</button>
+              <div id="status-club-edit" class="status" style="margin:0; flex:1;"></div>
+            </div>
+          </div>
+
+          <!-- SUB-TAB 2: SQUAD, TACTICS PITCH & TRANSFERS -->
+          <div id="mtab-squad" class="modal-tab-panel">
+            <div class="tactics-split">
+              <!-- Visual Starting XI Pitch + Roles -->
+              <div>
+                <div class="pitch-box" id="tactics-pitch"></div>
+                <div class="card" style="margin:10px 0 0; padding:10px 12px; background:rgba(11,18,32,0.6);">
+                  <div style="font-size:0.82rem; font-weight:600; color:var(--muted); margin-bottom:6px;">🎖️ Team Roles (Captain &amp; Set Pieces)</div>
+                  <div class="form-grid" style="margin:0; gap:8px;">
                     <div class="field">
-                      <label for="of-club-name">Club Name (max 48 chars):</label>
-                      <input type="text" id="of-club-name" class="text-input" maxlength="48">
+                      <label for="role-captain">Captain:</label>
+                      <select id="role-captain" class="select-input"></select>
                     </div>
                     <div class="field">
-                      <label for="of-club-abv">3-Letter Scoreboard Abbreviation:</label>
-                      <input type="text" id="of-club-abv" class="text-input" maxlength="3">
+                      <label for="role-fk">Free Kick Taker:</label>
+                      <select id="role-fk" class="select-input"></select>
+                    </div>
+                    <div class="field">
+                      <label for="role-pen">Penalty Taker:</label>
+                      <select id="role-pen" class="select-input"></select>
+                    </div>
+                    <div class="field">
+                      <label for="role-cor">Corner Taker:</label>
+                      <select id="role-cor" class="select-input"></select>
                     </div>
                   </div>
-                  <div class="toolbar" style="margin-bottom:0; justify-content:space-between;">
-                    <button class="btn" id="btn-save-club">Save Club Name &amp; Abbr</button>
-                    <label class="btn" style="cursor:pointer;">
-                      🖼️ Upload PNG Crest for this Club
-                      <input type="file" id="file-club-crest" accept="image/png,image/jpeg,image/webp" style="display:none;">
-                    </label>
+                </div>
+              </div>
+
+              <!-- Squad List + Swap / Transfer / Create Player -->
+              <div>
+                <div class="toolbar" style="margin-bottom:6px; justify-content:space-between;">
+                  <span style="font-size:0.84rem; color:var(--muted);">Click a player to edit stats/face, or use <strong>⇅ Swap</strong> to reorder Starting XI &amp; Subs:</span>
+                  <div style="display:flex; gap:6px;">
+                    <button class="btn" id="btn-transfer-player" style="padding:5px 10px; font-size:0.8rem;">🔁 Sign / Transfer Player</button>
+                    <button class="btn" id="btn-create-player" style="padding:5px 10px; font-size:0.8rem;">➕ Create New Player</button>
                   </div>
-                  <div id="status-club-edit" class="status"></div>
                 </div>
 
-                <!-- Squad table -->
-                <div style="font-size:0.88rem; color:var(--muted); margin-bottom:4px;">Click any squad player below to edit name, shirt number, age, or stats:</div>
-                <div class="squad-table-wrap">
+                <!-- Transfer Search Box (toggled) -->
+                <div id="transfer-box" class="card" style="display:none; margin-bottom:8px; padding:10px; background:#0d182c;">
+                  <div style="font-size:0.82rem; color:var(--blue); margin-bottom:6px;">Search any of the 5,000 players in the database to assign to the selected squad slot:</div>
+                  <div style="display:flex; gap:6px;">
+                    <input type="search" id="transfer-search-input" class="search-input" placeholder="Type player name (e.g. Ronaldinho, Messi, Riquelme, Henry)...">
+                    <button class="btn" id="btn-close-transfer">Close</button>
+                  </div>
+                  <div id="transfer-results" class="club-list" style="max-height:150px; margin-top:6px;"></div>
+                </div>
+
+                <div class="squad-table-wrap" style="max-height:360px; margin-top:0;">
                   <table class="squad-table">
                     <thead>
                       <tr>
+                        <th>Role</th>
                         <th>#</th>
-                        <th>ID</th>
                         <th>Name</th>
-                        <th>Shirt</th>
                         <th>Pos</th>
+                        <th>OVR</th>
                         <th>Age</th>
-                        <th>ATK / DEF / SPD</th>
                         <th>Face</th>
+                        <th>Actions</th>
                       </tr>
                     </thead>
                     <tbody id="of-squad-tbody"></tbody>
                   </table>
                 </div>
+              </div>
+            </div>
+          </div>
 
-                <!-- Selected Player Editor -->
-                <div id="of-player-box" class="card" style="display:none; margin-top:12px; margin-bottom:0; padding:14px; background:rgba(11,18,32,0.6);">
-                  <h4 id="of-player-title" style="margin:0 0 10px; font-size:0.95rem; color:var(--blue);">Edit Player</h4>
-                  <div class="form-grid-3">
-                    <div class="field">
-                      <label for="of-p-name">Player Name (UTF-16, max 15):</label>
-                      <input type="text" id="of-p-name" class="text-input" maxlength="15">
-                    </div>
-                    <div class="field">
-                      <label for="of-p-shirt">Shirt Name (ASCII):</label>
-                      <input type="text" id="of-p-shirt" class="text-input" maxlength="15">
-                    </div>
-                    <div class="field">
-                      <label for="of-p-num">Squad Shirt Number (1–99):</label>
-                      <input type="number" id="of-p-num" class="text-input" min="1" max="99">
-                    </div>
-                  </div>
-                  <div class="form-grid-3">
-                    <div class="field">
-                      <label for="of-p-age">Age (15–46):</label>
-                      <input type="number" id="of-p-age" class="text-input" min="15" max="46">
-                    </div>
-                    <div class="field">
-                      <label for="of-p-height">Height cm (148–211):</label>
-                      <input type="number" id="of-p-height" class="text-input" min="148" max="211">
-                    </div>
-                    <div class="field">
-                      <label for="of-p-atk">Attack / Defence / Speed (1–99):</label>
-                      <div style="display:flex; gap:6px;">
-                        <input type="number" id="of-p-atk" class="text-input" min="1" max="99" title="Attack">
-                        <input type="number" id="of-p-def" class="text-input" min="1" max="99" title="Defence">
-                        <input type="number" id="of-p-spd" class="text-input" min="1" max="99" title="Top Speed">
-                      </div>
-                    </div>
-                  </div>
-                  <div class="toolbar" style="margin-bottom:0; justify-content:space-between;">
-                    <button class="btn" id="btn-save-player">Apply Player Changes</button>
-                    <label class="btn" style="cursor:pointer;">
-                      🧑 Upload Face (PNG / PC .bin) for this Player
-                      <input type="file" id="file-player-face" accept=".png,.jpg,.jpeg,.webp,.bin" style="display:none;">
-                    </label>
-                  </div>
+          <!-- SUB-TAB 3: SELECTED PLAYER FULL EDITOR (STATS, APPEARANCE & FACE) -->
+          <div id="mtab-player" class="modal-tab-panel">
+            <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px; margin-bottom:10px;">
+              <div style="display:flex; align-items:center; gap:12px;">
+                <canvas id="player-face-preview" width="32" height="64" class="player-face-canvas"></canvas>
+                <div>
+                  <h4 id="of-player-title" style="margin:0; font-size:1.1rem; color:var(--blue);">Select a player from the Squad tab</h4>
+                  <div id="of-player-sub" style="font-size:0.84rem; color:var(--muted);">Edit name, nationality, position, appearance, 32×64 photo face, and all attributes.</div>
+                </div>
+              </div>
+              <div style="display:flex; gap:8px;">
+                <label class="btn" style="cursor:pointer;">
+                  🧑 Upload Photo Face (PNG / PC .bin)
+                  <input type="file" id="file-player-face" accept=".png,.jpg,.jpeg,.webp,.bin" style="display:none;">
+                </label>
+                <button class="btn btn-primary" id="btn-save-player" style="padding:8px 18px;">💾 Apply Player Changes</button>
+              </div>
+            </div>
+
+            <!-- Basic Info & Appearance -->
+            <div class="form-grid-4">
+              <div class="field">
+                <label for="of-p-name">Player Name (max 15):</label>
+                <input type="text" id="of-p-name" class="text-input" maxlength="15">
+              </div>
+              <div class="field">
+                <label for="of-p-shirt">Shirt Name (ASCII):</label>
+                <input type="text" id="of-p-shirt" class="text-input" maxlength="15">
+              </div>
+              <div class="field">
+                <label for="of-p-num">Squad Number (1–99):</label>
+                <input type="number" id="of-p-num" class="text-input" min="1" max="99">
+              </div>
+              <div class="field">
+                <label for="of-p-pos">Registered Position:</label>
+                <select id="of-p-pos" class="select-input"></select>
+              </div>
+              <div class="field">
+                <label for="of-p-nat">Nationality:</label>
+                <select id="of-p-nat" class="select-input"></select>
+              </div>
+              <div class="field">
+                <label for="of-p-age">Age (15–46):</label>
+                <input type="number" id="of-p-age" class="text-input" min="15" max="46">
+              </div>
+              <div class="field">
+                <label for="of-p-height">Height (cm) / Weight (kg):</label>
+                <div style="display:flex; gap:6px;">
+                  <input type="number" id="of-p-height" class="text-input" min="148" max="211" title="Height cm">
+                  <input type="number" id="of-p-weight" class="text-input" min="40" max="127" title="Weight kg">
+                </div>
+              </div>
+              <div class="field">
+                <label for="of-p-foot">Stronger Foot &amp; Skin Tone:</label>
+                <div style="display:flex; gap:6px;">
+                  <select id="of-p-foot" class="select-input">
+                    <option value="0">Right Foot</option>
+                    <option value="1">Left Foot</option>
+                  </select>
+                  <select id="of-p-skin" class="select-input">
+                    <option value="0">Skin 1 (Light)</option>
+                    <option value="1">Skin 2 (Medium)</option>
+                    <option value="2">Skin 3 (Tan)</option>
+                    <option value="3">Skin 4 (Dark)</option>
+                  </select>
                 </div>
               </div>
             </div>
+
+            <!-- Attributes Grid (1-99) -->
+            <div style="margin-top:12px; border-top:1px solid var(--border); padding-top:10px;">
+              <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                <span style="font-size:0.88rem; font-weight:600; color:var(--muted);">⚡ Player Abilities (1–99)</span>
+                <div style="display:flex; gap:6px;">
+                  <button class="btn" id="btn-boost-player" style="padding:4px 10px; font-size:0.78rem;">+5 All Stats</button>
+                  <button class="btn" id="btn-nerf-player" style="padding:4px 10px; font-size:0.78rem;">-5 All Stats</button>
+                </div>
+              </div>
+              <div class="stats-grid">
+                <div class="field"><label>Attack</label><input type="number" id="of-p-atk" class="text-input" min="1" max="99"></div>
+                <div class="field"><label>Defence</label><input type="number" id="of-p-def" class="text-input" min="1" max="99"></div>
+                <div class="field"><label>Balance</label><input type="number" id="of-p-bal" class="text-input" min="1" max="99"></div>
+                <div class="field"><label>Stamina</label><input type="number" id="of-p-sta" class="text-input" min="1" max="99"></div>
+                <div class="field"><label>Top Speed</label><input type="number" id="of-p-spd" class="text-input" min="1" max="99"></div>
+                <div class="field"><label>Acceleration</label><input type="number" id="of-p-acc" class="text-input" min="1" max="99"></div>
+                <div class="field"><label>Response</label><input type="number" id="of-p-res" class="text-input" min="1" max="99"></div>
+                <div class="field"><label>Agility</label><input type="number" id="of-p-agi" class="text-input" min="1" max="99"></div>
+                <div class="field"><label>Dribble Acc</label><input type="number" id="of-p-drb" class="text-input" min="1" max="99"></div>
+                <div class="field"><label>Dribble Spd</label><input type="number" id="of-p-drs" class="text-input" min="1" max="99"></div>
+                <div class="field"><label>Short Pass</label><input type="number" id="of-p-spa" class="text-input" min="1" max="99"></div>
+                <div class="field"><label>Long Pass</label><input type="number" id="of-p-lpa" class="text-input" min="1" max="99"></div>
+                <div class="field"><label>Shot Acc</label><input type="number" id="of-p-sha" class="text-input" min="1" max="99"></div>
+                <div class="field"><label>Shot Power</label><input type="number" id="of-p-shp" class="text-input" min="1" max="99"></div>
+                <div class="field"><label>Technique</label><input type="number" id="of-p-tec" class="text-input" min="1" max="99"></div>
+                <div class="field"><label>Header</label><input type="number" id="of-p-hdr" class="text-input" min="1" max="99"></div>
+                <div class="field"><label>Jump</label><input type="number" id="of-p-jmp" class="text-input" min="1" max="99"></div>
+                <div class="field"><label>GK Ability</label><input type="number" id="of-p-gka" class="text-input" min="1" max="99"></div>
+              </div>
+            </div>
+            <div id="status-player-edit" class="status"></div>
           </div>
         </div>
       </div>
 
-      <!-- 3. Player Faces (Batch Faceserver or Individual) -->
-      <div class="card">
-        <h2><span class="step-badge">STEP 3</span> Player Faces (PC Faceserver Batch or Loose Images)</h2>
-        <p class="hint">Drop a folder or selection of files from a PC patch's <code>kitserver/GDB/faces/</code> (including <code>map.txt</code> + face <code>.png</code> / <code>.bin</code> files), or drop files named by player ID (e.g. <code>1340.png</code>, <code>1340.bin</code>). Every face is landmark-warped to the PSP's 32×64 head UV layout.</p>
+      <!-- Optional Batch Importers (Faceserver & 169-Crest Bank) -->
+      <div class="card" style="margin-top:16px;">
+        <h2>📦 Optional Bulk Importers (PC Faceserver &amp; Full 169-Crest Bank)</h2>
+        <p class="hint">Want to import thousands of player faces or a full 169-crest bank from an existing PES6 PC patch at once? Drop them here:</p>
+        <div class="form-grid">
+          <div style="border:1px solid var(--border); border-radius:10px; padding:12px; background:rgba(11,18,32,0.45);">
+            <strong style="font-size:0.92rem;">🧑 Batch Player Faces (<code>GDB/faces</code>)</strong>
+            <p class="hint" style="font-size:0.82rem; margin:4px 0 10px;">Select a <code>kitserver/GDB/faces/</code> folder (with <code>map.txt</code>) or loose <code>&lt;id&gt;.png/.bin</code> files.</p>
+            <div class="toolbar" style="margin-bottom:0;">
+              <label class="btn" style="cursor:pointer;">
+                📂 Faces Folder
+                <input type="file" id="file-faces-dir" webkitdirectory directory multiple style="display:none;">
+              </label>
+              <label class="btn" style="cursor:pointer;">
+                🖼️ Face Files
+                <input type="file" id="file-faces-multi" multiple accept=".txt,.png,.jpg,.jpeg,.webp,.bin" style="display:none;">
+              </label>
+              <button class="btn" id="btn-clear-faces" style="display:none;">Clear</button>
+            </div>
+            <div class="toolbar" style="margin-top:8px; margin-bottom:0;">
+              <input type="number" id="single-face-id" class="text-input" style="max-width:140px;" min="1" max="32767" placeholder="Player ID">
+              <label class="btn" style="cursor:pointer;">
+                ➕ Face by ID
+                <input type="file" id="file-face-by-id" accept=".png,.jpg,.jpeg,.webp,.bin" style="display:none;">
+              </label>
+            </div>
+            <div id="prog-faces" class="progress-wrap">
+              <div class="progress-bar"><div id="prog-faces-fill" class="progress-fill"></div></div>
+              <div id="prog-faces-text" class="progress-text"></div>
+            </div>
+            <div id="status-faces" class="status"></div>
+            <div id="face-gallery" class="face-gallery" style="display:none;"></div>
+          </div>
 
-        <div class="toolbar">
-          <label class="btn" style="cursor:pointer;">
-            📂 Select Faceserver Folder (<code>GDB/faces</code>)
-            <input type="file" id="file-faces-dir" webkitdirectory directory multiple style="display:none;">
-          </label>
-          <label class="btn" style="cursor:pointer;">
-            🖼️ Add Face Files (<code>map.txt</code>, <code>.png</code>, <code>.bin</code>)
-            <input type="file" id="file-faces-multi" multiple accept=".txt,.png,.jpg,.jpeg,.webp,.bin" style="display:none;">
-          </label>
-          <button class="btn" id="btn-clear-faces" style="display:none;">Clear Faces</button>
+          <div style="border:1px solid var(--border); border-radius:10px; padding:12px; background:rgba(11,18,32,0.45);">
+            <strong style="font-size:0.92rem;">🛡️ Full 169-Crest Bank (PC <code>dat/0_text.afs</code> or <code>.flg</code>)</strong>
+            <p class="hint" style="font-size:0.82rem; margin:4px 0 10px;">Converts all 169 club crests &amp; national flags into PSP slots <code>2347.bin</code> and <code>2350.bin</code>.</p>
+            <label class="dropzone" id="dz-crests" style="padding:14px 12px;">
+              <input type="file" id="file-crests" accept=".afs,.flg,.bin">
+              <div class="dz-title" style="font-size:0.9rem;">Drop PC dat/0_text.afs or 64×64 crest .flg</div>
+              <div class="dz-sub" style="font-size:0.78rem;">Also shows the PC crests live in the Select Team grid above!</div>
+            </label>
+            <div id="status-crests" class="status"></div>
+          </div>
         </div>
-
-        <div class="toolbar" style="margin-top:10px;">
-          <input type="number" id="single-face-id" class="text-input" style="max-width:190px;" min="1" max="32767" placeholder="Player DB ID (e.g. 1340)">
-          <label class="btn" style="cursor:pointer;">
-            ➕ Add Face for this Player ID
-            <input type="file" id="file-face-by-id" accept=".png,.jpg,.jpeg,.webp,.bin" style="display:none;">
-          </label>
-        </div>
-
-        <div id="prog-faces" class="progress-wrap">
-          <div class="progress-bar"><div id="prog-faces-fill" class="progress-fill"></div></div>
-          <div id="prog-faces-text" class="progress-text"></div>
-        </div>
-        <div id="status-faces" class="status"></div>
-        <div id="face-gallery" class="face-gallery" style="display:none;"></div>
       </div>
 
-      <!-- 4. Full PC Crest Bank (0_text.afs / .flg) -->
+      <!-- Download Patch ZIP -->
       <div class="card">
-        <h2><span class="step-badge">STEP 4</span> Full League Crest Bank from a PC Patch (Optional)</h2>
-        <p class="hint">If you have a full PES6 PC patch's <code>dat/0_text.afs</code> (or extracted member 536 <code>.flg</code>), drop it here to convert all 169 club crests &amp; national flags into PSP slots <code>2347.bin</code> (32×32) and <code>2350.bin</code> (64×64). <em>Requires loading your PSP <code>pes6.iso</code> in Tab 1 first.</em></p>
-
-        <label class="dropzone" id="dz-crests">
-          <input type="file" id="file-crests" accept=".afs,.flg,.bin">
-          <div class="dz-title">Drop your PC patch's dat/0_text.afs or 64×64 crest .flg here</div>
-          <div class="dz-sub">Converts all 169 crests and requantizes the shared flag/scoreboard palette</div>
-        </label>
-        <div id="status-crests" class="status"></div>
-      </div>
-
-      <!-- 5. Build & Download Patch ZIP -->
-      <div class="card">
-        <h2><span class="step-badge">STEP 5</span> Build &amp; Download Patch for PS Vita</h2>
-        <p class="hint" id="patch-summary-text">Add an Option File, player faces, or a crest bank above, then click below to download the ready-to-install PS Vita patch ZIP.</p>
+        <h2>🚀 Save &amp; Export Patch for PS Vita</h2>
+        <p class="hint" id="patch-summary-text">Ready to package your patch for PS Vita.</p>
         <div style="display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:12px;">
-          <button class="btn btn-primary" id="btn-build-patch" disabled>📦 Build &amp; Download Patch (.zip)</button>
-          <button class="btn" id="btn-download-databin" style="display:none;">💾 Download Edited DATA.BIN Only</button>
+          <button class="btn btn-primary" id="btn-build-patch">📦 Build &amp; Download Patch (.zip)</button>
+          <button class="btn" id="btn-download-databin">💾 Download DATA.BIN Only</button>
         </div>
         <div id="status-build-patch" class="status"></div>
       </div>
